@@ -70,8 +70,7 @@ docker compose down
 ## Ghi chú
 
 - Máy chạy bot cần có `ffmpeg` hoặc đặt đường dẫn vào biến môi trường `FFMPEG_PATH`.
-- Nếu bot không encode được voice, hãy đảm bảo package `opusscript` được cài.
-- Project ưu tiên encoder native `@discordjs/opus` để giảm tải CPU; `opusscript` vẫn được giữ làm fallback.
+- Project ưu tiên encoder native `@discordjs/opus` để giảm tải CPU; `opusscript@0.0.x` được giữ làm fallback tương thích với `prism-media`.
 - Âm lượng mặc định là `1.15x`; chỉnh bằng `AUDIO_VOLUME` trong khoảng `0` đến `2` nếu cần.
 - Chất lượng Opus mặc định là `128 kbps`; chỉnh bằng `OPUS_BITRATE` nếu server giới hạn bitrate voice.
 - `CROSSFADE_SECONDS=5` nối các bài trong cùng một cụm bằng fade in/out; đặt `0` để tắt.
