@@ -1,4 +1,6 @@
-FROM node:22-bookworm-slim
+# The full Bookworm image includes the system CA bundle needed to verify
+# Debian HTTPS repositories during apt-get update.
+FROM node:22-bookworm
 
 ENV NODE_ENV=production
 WORKDIR /app
