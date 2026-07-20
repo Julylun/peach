@@ -13,6 +13,7 @@ Bot Discord đơn giản để phát nhạc từ file local như `.mp3`, `.wav`,
   - `/stop` - dừng phát và xoá queue
   - `/leave` - rời voice channel
   - `/status` - xem trạng thái bot/voice/queue
+  - `/panel` - mở panel điều khiển trực tiếp bằng nút và menu
   - `/loop [enabled]` - lặp playlist vô hạn
   - `/repeat mode` - `off`, lặp bài hiện tại (`one`) hoặc lặp playlist (`all`)
   - `/random [enabled]` - chọn bài kế tiếp ngẫu nhiên
@@ -21,6 +22,8 @@ Bot Discord đơn giản để phát nhạc từ file local như `.mp3`, `.wav`,
   - `/remove position`, `/clear`, `/queue page`
 - Prefix commands `!join`, `!play`, ... chỉ chạy khi bật `ENABLE_PREFIX_COMMANDS=true`
 - Slash command phản hồi bằng embed PeachBot màu hồng, có tiêu đề và trạng thái dễ đọc.
+- `/panel` có nút `Play all`, `Pause`, `Resume`, `Skip`, `Stop`, `Shuffle`, `Random`, `Clear`, `Leave`, `Refresh` và menu chọn `Repeat`/`Volume`.
+- `/join` cũng tự mở panel sau khi bot vào voice channel.
 
 ## Cấu trúc
 
@@ -44,6 +47,8 @@ fnm exec --using v25.9.0 npm install
 ```bash
 fnm exec --using v25.9.0 npm start
 ```
+
+Sau khi bot chạy, gõ `/panel` trong một text channel. Nếu command chưa xuất hiện, hãy kiểm tra `DISCORD_GUILD_ID` trong `.env` rồi restart bot để đăng ký lại slash commands trong server.
 
 ## Ghi chú
 
