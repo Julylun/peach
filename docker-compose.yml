@@ -1,0 +1,17 @@
+services:
+  peachbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: peachbot
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      # These paths are inside the container, not host paths.
+      MUSIC_DIR: /app/music
+      FFMPEG_PATH: ffmpeg
+    volumes:
+      - ./music:/app/music:ro
+    stop_grace_period: 20s

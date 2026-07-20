@@ -50,6 +50,23 @@ fnm exec --using v25.9.0 npm start
 
 Sau khi bot chạy, gõ `/panel` trong một text channel. Nếu command chưa xuất hiện, hãy kiểm tra `DISCORD_GUILD_ID` trong `.env` rồi restart bot để đăng ký lại slash commands trong server.
 
+## Chạy bằng Docker Compose
+
+Docker sẽ tự đọc `DISCORD_TOKEN` và các cấu hình khác từ file `.env`. Thư mục `music/` trên máy được mount vào `/app/music` trong container, nên thêm hoặc xóa nhạc không cần build lại image.
+
+```bash
+docker compose up -d --build
+docker compose logs -f peachbot
+```
+
+Dừng bot:
+
+```bash
+docker compose down
+```
+
+`MUSIC_DIR` và `FFMPEG_PATH` trong Compose được cố định thành đường dẫn bên trong container; không cần sửa hai biến này trong `.env` khi chạy Docker.
+
 ## Ghi chú
 
 - Máy chạy bot cần có `ffmpeg` hoặc đặt đường dẫn vào biến môi trường `FFMPEG_PATH`.
