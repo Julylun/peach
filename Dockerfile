@@ -5,7 +5,10 @@ WORKDIR /app
 
 # FFmpeg is required for decoding local audio files. The build tools allow
 # native audio packages to compile when a prebuilt binary is unavailable.
-RUN apt-get update \
+# Use HTTPS and discard any stale package lists before verifying Debian metadata.
+RUN rm -rf /var/lib/apt/lists/* \
+  && sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+  && apt-get update \
   && apt-get install -y --no-install-recommends \
     ffmpeg \
     ca-certificates \
