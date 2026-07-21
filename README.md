@@ -24,12 +24,23 @@ Bot Discord đơn giản để phát nhạc từ file local như `.mp3`, `.wav`,
 - Slash command phản hồi bằng embed PeachBot màu hồng, có tiêu đề và trạng thái dễ đọc.
 - `/panel` có nút `Play all`, `Pause`, `Resume`, `Skip`, `Stop`, `Shuffle`, `Random`, `Clear`, `Leave`, `Refresh` và menu chọn `Repeat`/`Volume`.
 - `/join` cũng tự mở panel sau khi bot vào voice channel.
-- Gemini AI có thể đọc lịch sử gần nhất, chỉ trả lời khi người dùng đang gọi Peach, và react tin nhắn bằng emoji phù hợp.
+- Gemini AI có thể đọc lịch sử gần nhất, chỉ trả lời khi người dùng đang gọi Peach, và react tin nhắn bằng emoji phù hợp. Peach có thể dùng nhiều emoji Unicode trong câu trả lời, không bị giới hạn ở một danh sách cố định.
 
 ## Cấu trúc
 
-- Đặt nhạc vào thư mục `music/`
-- Bot sẽ chỉ tìm và phát file bên trong thư mục này
+```text
+src/
+├── index.js              # khởi tạo client và nối các event/service
+├── config.js             # đọc, kiểm tra và chuẩn hóa biến môi trường
+├── commands.js           # slash commands và prefix commands
+├── ui.js                 # embed, music panel, button/select interactions
+├── ai/
+│   └── gemini.js         # context, ảnh đính kèm, retry, typing, reaction
+└── music/
+    └── service.js        # voice connection, queue, FFmpeg, playback state
+```
+
+Đặt nhạc vào thư mục `music/`; bot chỉ tìm và phát file bên trong thư mục này.
 
 ## Cài đặt
 
@@ -67,7 +78,7 @@ AI_ONLY_VOICE_CHANNEL=true
 AI_REQUIRE_BOT_IN_VOICE=false
 ```
 
-Nội dung tin nhắn, lịch sử và tối đa `AI_IMAGE_MAX_COUNT` ảnh đính kèm ở tin nhắn cuối được gửi tới Google Gemini khi tính năng bật. Ảnh vượt `AI_IMAGE_MAX_BYTES` sẽ bị bỏ qua; không bật AI trong các channel không muốn đưa dữ liệu ra ngoài.
+Nội dung tin nhắn, lịch sử và tối đa `AI_IMAGE_MAX_COUNT` ảnh đính kèm ở tin nhắn cuối được gửi tới Google Gemini khi tính năng bật. Lịch sử được gửi thành từng `contents` riêng với `role=user`; mỗi content có dạng `<nickname>...</nickname><content>...</content><is_latest>...</is_latest>` để model phân biệt người dùng và nhận biết tin nhắn cuối. Ảnh vượt `AI_IMAGE_MAX_BYTES` sẽ bị bỏ qua; không bật AI trong các channel không muốn đưa dữ liệu ra ngoài.
 
 Gemini sẽ retry tối đa `AI_API_RETRIES` lần sau lần gọi đầu với lỗi mạng, timeout, rate limit `429` hoặc lỗi server `5xx`, dùng exponential backoff. Lỗi API key/model/request không hợp lệ sẽ debug ngay.
 
