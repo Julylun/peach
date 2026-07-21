@@ -13,6 +13,7 @@ RUN rm -rf /var/lib/apt/lists/* \
   && apt-get update \
   && apt-get install -y --no-install-recommends \
     ffmpeg \
+    yt-dlp \
     ca-certificates \
     python3 \
     make \
@@ -28,5 +29,6 @@ RUN mkdir -p /app/music
 
 ENV MUSIC_DIR=/app/music
 ENV FFMPEG_PATH=ffmpeg
+ENV YTDLP_PATH=yt-dlp
 
 CMD ["node", "src/index.js"]

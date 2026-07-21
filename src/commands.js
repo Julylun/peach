@@ -12,7 +12,7 @@ function createCommandService({ client, config, music, ui, state, social }) {
       new SlashCommandBuilder().setName('join').setDescription('Vào voice channel của bạn'),
       new SlashCommandBuilder()
         .setName('play')
-        .setDescription('Phát file nhạc local')
+        .setDescription('Phát nhạc local hoặc URL YouTube')
         .addStringOption((option) => option
           .setName('playlist')
           .setDescription('Chọn playlist từ thư mục music')
@@ -20,7 +20,7 @@ function createCommandService({ client, config, music, ui, state, social }) {
           .setRequired(false))
         .addStringOption((option) => option
           .setName('query')
-          .setDescription('Bộ lọc tùy chọn cho file trong thư mục music')
+          .setDescription('Bộ lọc file local hoặc URL YouTube')
           .setRequired(false)),
       new SlashCommandBuilder().setName('playlists').setDescription('Xem các playlist trong thư mục music'),
       new SlashCommandBuilder().setName('pause').setDescription('Tạm dừng bài đang phát'),
@@ -377,7 +377,7 @@ function createCommandService({ client, config, music, ui, state, social }) {
     return [
       'Lệnh hiện có:',
       `\`${config.PREFIX}join\` - vào voice channel của bạn`,
-      `\`${config.PREFIX}play [lọc]\` - phát toàn bộ nhạc local hoặc lọc theo từ khóa`,
+      `\`${config.PREFIX}play [lọc|URL YouTube]\` - phát toàn bộ nhạc local, lọc file hoặc stream YouTube`,
       `\`${config.PREFIX}play playlist:lofi\` - phát một playlist trong music/`,
       `\`${config.PREFIX}playlists\` - xem playlist hiện có`,
       `\`${config.PREFIX}pause\` / \`${config.PREFIX}resume\` - tạm dừng/tiếp tục`,

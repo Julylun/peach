@@ -12,6 +12,7 @@ services:
       # These paths are inside the container, not host paths.
       MUSIC_DIR: /app/music
       FFMPEG_PATH: ffmpeg
+      YTDLP_PATH: yt-dlp
     volumes:
       - ./music:/app/music:ro
     stop_grace_period: 20s

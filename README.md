@@ -1,13 +1,12 @@
 # Discord Local Music Bot
 
-Bot Discord đơn giản để phát nhạc từ file local như `.mp3`, `.wav`, `.ogg`, `.opus`, `.webm`, `.m4a`, `.flac`.
+Bot Discord đơn giản để phát nhạc từ file local như `.mp3`, `.wav`, `.ogg`, `.opus`, `.webm`, `.m4a`, `.flac` và stream audio từ URL YouTube.
 
 ## Tính năng
 
 - Slash commands mặc định:
   - `/join` - vào voice channel của bạn
-  - `/play [query]` - queue toàn bộ file trong `music/` hoặc lọc theo query
-  - `/play [playlist] [query]` - phát một playlist hoặc toàn bộ `music/`
+  - `/play [playlist] [query]` - phát một playlist, toàn bộ `music/` hoặc URL YouTube
   - `/playlists` - xem playlist và chọn bằng autocomplete của `/play`
   - `/queue` - xem danh sách đang chờ
   - `/list [filter]` - liệt kê file nhạc trong thư mục local
@@ -68,6 +67,8 @@ music/
 ```
 
 `/play playlist:lofi` phát playlist `lofi`, `/play playlist:all` hoặc `/play` không chọn playlist phát toàn bộ nhạc trong `music/`. Dùng `/playlists` để xem danh sách; option `playlist` của `/play` có autocomplete.
+
+Để phát YouTube, gửi URL vào option `query` của `/play`, dùng `!play <url>`, hoặc nói tự nhiên với Peach như “Peach phát link YouTube này”. Bot dùng `yt-dlp` stream audio trực tiếp qua FFmpeg, không lưu video/audio vào thư mục `music/`.
 
 ## Cài đặt
 
@@ -147,6 +148,7 @@ docker compose down
 ## Ghi chú
 
 - Máy chạy bot cần có `ffmpeg` hoặc đặt đường dẫn vào biến môi trường `FFMPEG_PATH`.
+- Máy chạy bot cần có `yt-dlp` trong PATH hoặc đặt `YTDLP_PATH`; Dockerfile đã cài sẵn `yt-dlp`.
 - Định dạng audio được nhận diện gồm `.mp3`, `.wav`, `.ogg`, `.oga`, `.opus`, `.m4a`, `.m4b`, `.flac`, `.aac`, `.webm`, `.weba` và `.mka`; FFmpeg sẽ giải mã về PCM 48 kHz stereo trước khi gửi vào Discord.
 - Project ưu tiên encoder native `@discordjs/opus` để giảm tải CPU; `opusscript@0.0.x` được giữ làm fallback tương thích với `prism-media`.
 - Âm lượng mặc định là `1.15x`; chỉnh bằng `AUDIO_VOLUME` trong khoảng `0` đến `2` nếu cần.

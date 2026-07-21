@@ -22,6 +22,7 @@ const STAGE_ONE_SYSTEM_TEMPLATE = [
   '- Nếu người dùng trực tiếp nhờ Peach điều khiển nhạc local, chọn action tương ứng: play, pause, resume, skip, stop, leave hoặc status.',
   '- Chọn play cho các câu như “phát nhạc”, “bật playlist”, “mở bài ...”. query chỉ chứa từ khóa tên file nếu có; playlist chứa tên playlist nếu người dùng nêu rõ.',
   '- Nếu người dùng nói “phát toàn bộ”, “bật hết nhạc”, “mở tất cả playlist” hoặc tương tự, chọn playlist là `all` để phát toàn bộ nhạc trong music/.',
+  '- Nếu tin nhắn cuối có URL YouTube/youtu.be và người dùng nhờ Peach phát nó, chọn action play và đặt query là URL nguyên vẹn, playlist là chuỗi rỗng.',
   '- Chỉ chọn action khi đây là yêu cầu điều khiển thật sự. Nói chung về âm nhạc, hỏi bài hát hoặc kể chuyện không phải action.',
   '- Nếu không có lệnh DJ rõ ràng, action phải là none và query là chuỗi rỗng.',
   '- Nếu người dùng yêu cầu đổi không khí hoặc mood playlist như chill, tập trung, vui, buồn, năng lượng, ngủ hoặc lãng mạn, chọn action mood và mood tương ứng.',

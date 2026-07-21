@@ -35,6 +35,7 @@ const config = {
   MUSIC_DIR: path.resolve(process.env.MUSIC_DIR || path.join(process.cwd(), 'music')),
   STATE_FILE: path.resolve(process.env.PEACH_STATE_FILE || path.join(process.cwd(), 'data', 'peach-state.json')),
   FFMPEG_PATH: resolveFfmpegPath(),
+  YTDLP_PATH: process.env.YTDLP_PATH?.trim() || 'yt-dlp',
   ENABLE_PREFIX_COMMANDS: process.env.ENABLE_PREFIX_COMMANDS === 'true',
   GUILD_ID: process.env.DISCORD_GUILD_ID || '',
   VOICE_DEBUG: process.env.VOICE_DEBUG !== 'false',

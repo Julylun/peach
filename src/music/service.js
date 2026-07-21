@@ -141,6 +141,7 @@ function createMusicService({ client, config, stateStore }) {
         volume: config.AUDIO_VOLUME,
         connection: null,
         ffmpegProcess: null,
+        ytdlpProcess: null,
         textChannelId: null,
         waitingForReady: false,
         voiceReconnectAttempts: 0,
@@ -282,6 +283,34 @@ function createMusicService({ client, config, stateStore }) {
     return relative.includes('/') ? firstPart : 'default';
   }
 
+  function trackKey(track) {
+    return track?.filePath || track?.url || track?.displayName;
+  }
+
+  function isYouTubeUrl(value) {
+    try {
+      const url = new URL(String(value).trim());
+      const hostname = url.hostname.toLowerCase().replace(/^www\./, '');
+      return [
+        'youtube.com',
+        'm.youtube.com',
+        'music.youtube.com',
+        'youtu.be',
+      ].includes(hostname);
+    } catch {
+      return false;
+    }
+  }
+
+  function createYouTubeTrack(url) {
+    return {
+      source: 'youtube',
+      url: String(url).trim(),
+      displayName: `YouTube • ${String(url).trim()}`,
+      playlist: 'youtube',
+    };
+  }
+
   function collectPlayableTracksFromDirectory(filterText = '', rootDir = config.MUSIC_DIR, playlistName = '') {
     const items = [];
     const lowerFilter = filterText.trim().toLowerCase();
@@ -315,11 +344,11 @@ function createMusicService({ client, config, stateStore }) {
   function refillLoopQueue(state) {
     if (state.repeatMode !== 'all' || state.playlist.length === 0) return false;
 
-    state.queue.push(...state.playlist.filter((track) => !state.invalidTracks.has(track.filePath)));
+    state.queue.push(...state.playlist.filter((track) => !state.invalidTracks.has(trackKey(track))));
     if (state.randomEnabled) {
       shuffleInPlace(state.queue);
 
-      if (state.current && state.queue.length > 1 && state.queue[0].filePath === state.current.filePath) {
+      if (state.current && state.queue.length > 1 && trackKey(state.queue[0]) === trackKey(state.current)) {
         [state.queue[0], state.queue[1]] = [state.queue[1], state.queue[0]];
       }
     }
@@ -328,12 +357,12 @@ function createMusicService({ client, config, stateStore }) {
   }
 
   function takeNextTrack(state) {
-    if (state.repeatMode === 'one' && state.current && !state.invalidTracks.has(state.current.filePath)) {
+    if (state.repeatMode === 'one' && state.current && !state.invalidTracks.has(trackKey(state.current))) {
       return state.current;
     }
 
     if (state.queue.length === 0) refillLoopQueue(state);
-    const eligible = state.queue.filter((track) => !state.invalidTracks.has(track.filePath));
+    const eligible = state.queue.filter((track) => !state.invalidTracks.has(trackKey(track)));
     if (eligible.length === 0) {
       state.queue.length = 0;
       return null;
@@ -341,7 +370,7 @@ function createMusicService({ client, config, stateStore }) {
 
     let candidates = eligible;
     if (state.smartQueue && eligible.length > 1) {
-      const fresh = eligible.filter((track) => !state.recentTracks.includes(track.filePath));
+      const fresh = eligible.filter((track) => !state.recentTracks.includes(trackKey(track)));
       if (fresh.length > 0) candidates = fresh;
     }
 
@@ -470,6 +499,7 @@ function createMusicService({ client, config, stateStore }) {
     if (!state) return;
 
     if (state.ffmpegProcess && !state.ffmpegProcess.killed) state.ffmpegProcess.kill('SIGKILL');
+    if (state.ytdlpProcess && !state.ytdlpProcess.killed) state.ytdlpProcess.kill('SIGKILL');
     state.queue.length = 0;
     state.current = null;
     state.textChannelId = null;
@@ -555,6 +585,12 @@ function createMusicService({ client, config, stateStore }) {
     );
   }
 
+  function collectInputTracks(query = '', playlistName = '') {
+    const input = String(query || '').trim();
+    if (isYouTubeUrl(input)) return [createYouTubeTrack(input)];
+    return playlistName ? collectPlaylistTracks(playlistName, input) : collectPlayableTracks(input);
+  }
+
   function orderTracksForMood(tracks, mood) {
     if (!MOOD_KEYWORDS[mood]) return tracks.slice();
     const keywords = MOOD_KEYWORDS[mood];
@@ -622,6 +658,71 @@ function createMusicService({ client, config, stateStore }) {
     return attachFfmpegLogging(spawn(config.FFMPEG_PATH, args, { stdio: ['ignore', 'pipe', 'pipe'] }), formatRelative(filePath), onFailure);
   }
 
+  function createYouTubeFfmpegStream(url, onFailure) {
+    const { spawn } = require('child_process');
+    const ytdlp = spawn(config.YTDLP_PATH, [
+      '--no-playlist',
+      '--no-warnings',
+      '--quiet',
+      '--no-progress',
+      '-f', 'bestaudio/best',
+      '-o', '-',
+      '--', url,
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const ffmpeg = spawn(config.FFMPEG_PATH, [
+      '-nostdin', '-hide_banner', '-loglevel', 'error',
+      '-i', 'pipe:0', '-map', '0:a:0', '-vn', '-sn', '-dn',
+      '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1',
+    ], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+    let streamEnded = false;
+    let failureReported = false;
+    const reportFailure = (error) => {
+      if (failureReported || streamEnded) return;
+      failureReported = true;
+      onFailure?.(error);
+    };
+
+    let ytdlpStderr = '';
+    ytdlp.stderr.on('data', (chunk) => {
+      ytdlpStderr = `${ytdlpStderr}${chunk}`.slice(-2_000);
+    });
+    ytdlp.on('error', (error) => {
+      console.error(`[yt-dlp] failed for ${url}`, error);
+      reportFailure(error);
+      if (!ffmpeg.killed) ffmpeg.kill('SIGKILL');
+    });
+    ytdlp.on('close', (code, signal) => {
+      if (code !== 0 && signal !== 'SIGKILL' && !streamEnded) {
+        console.error(`[yt-dlp] exited code=${code ?? signal} url=${url}\n${ytdlpStderr}`);
+        reportFailure(new Error(`yt-dlp exit ${code ?? signal}`));
+      }
+    });
+
+    const ffmpegProcess = attachFfmpegLogging(
+      ffmpeg,
+      `youtube ${url}`,
+      reportFailure
+    );
+    const handlePipeError = (error) => {
+      // Stopping a track closes FFmpeg stdin while yt-dlp may still be writing.
+      // EPIPE is expected during that shutdown and must not crash Node.
+      if (['EPIPE', 'ERR_STREAM_DESTROYED'].includes(error?.code)) return;
+      reportFailure(error);
+    };
+    ffmpeg.stdin.on('error', handlePipeError);
+    ytdlp.stdout.on('error', handlePipeError);
+    ffmpegProcess.on('close', () => {
+      streamEnded = true;
+      ytdlp.stdout.unpipe(ffmpeg.stdin);
+      if (!ffmpeg.stdin.destroyed) ffmpeg.stdin.destroy();
+      if (!ytdlp.killed) ytdlp.kill('SIGKILL');
+    });
+    ytdlp.stdout.pipe(ffmpeg.stdin);
+
+    return { ffmpegProcess, ytdlpProcess: ytdlp };
+  }
+
   function createCrossfadeFfmpegStream(tracks, onFailure) {
     const { spawn } = require('child_process');
     const args = ['-nostdin', '-hide_banner', '-loglevel', 'error'];
@@ -655,8 +756,15 @@ function createMusicService({ client, config, stateStore }) {
       state.ffmpegProcess.kill('SIGKILL');
       state.ffmpegProcess = null;
     }
+    if (state.ytdlpProcess && !state.ytdlpProcess.killed) {
+      state.ytdlpProcess.kill('SIGKILL');
+      state.ytdlpProcess = null;
+    }
 
-    const batchSize = state.forceSingleNext ? 1 : config.CROSSFADE_SECONDS > 0 ? config.CROSSFADE_BATCH_SIZE : 1;
+    const hasYouTubeTrack = state.current?.source === 'youtube' || state.queue.some((track) => track.source === 'youtube');
+    const batchSize = state.forceSingleNext || hasYouTubeTrack
+      ? 1
+      : config.CROSSFADE_SECONDS > 0 ? config.CROSSFADE_BATCH_SIZE : 1;
     state.forceSingleNext = false;
     const batch = takeNextTracks(state, batchSize);
     const next = batch[0];
@@ -673,16 +781,16 @@ function createMusicService({ client, config, stateStore }) {
 
     state.current = next;
     state.recentTracks = [
-      next.filePath,
-      ...state.recentTracks.filter((filePath) => filePath !== next.filePath),
+      trackKey(next),
+      ...state.recentTracks.filter((key) => key !== trackKey(next)),
     ].slice(0, 3);
     const handleFfmpegFailure = () => {
       if (batch.length > 1) {
         state.forceSingleNext = true;
         state.queue.unshift(...batch);
       } else {
-        state.invalidTracks.add(next.filePath);
-        state.playlist = state.playlist.filter((track) => track.filePath !== next.filePath);
+        state.invalidTracks.add(trackKey(next));
+        state.playlist = state.playlist.filter((track) => trackKey(track) !== trackKey(next));
       }
 
       state.current = null;
@@ -693,16 +801,26 @@ function createMusicService({ client, config, stateStore }) {
       });
     };
 
-    const ffmpegProcess = batch.length > 1
-      ? createCrossfadeFfmpegStream(batch, handleFfmpegFailure)
-      : createFfmpegStream(next.filePath, handleFfmpegFailure);
+    let ffmpegProcess;
+    if (next.source === 'youtube') {
+      const youtubeStream = createYouTubeFfmpegStream(next.url, handleFfmpegFailure);
+      ffmpegProcess = youtubeStream.ffmpegProcess;
+      state.ytdlpProcess = youtubeStream.ytdlpProcess;
+    } else {
+      ffmpegProcess = batch.length > 1
+        ? createCrossfadeFfmpegStream(batch, handleFfmpegFailure)
+        : createFfmpegStream(next.filePath, handleFfmpegFailure);
+      state.ytdlpProcess = null;
+    }
     state.ffmpegProcess = ffmpegProcess;
 
     ffmpegProcess.on('close', () => {
       if (state.ffmpegProcess === ffmpegProcess) {
         state.ffmpegProcess = null;
+        if (state.ytdlpProcess && !state.ytdlpProcess.killed) state.ytdlpProcess.kill('SIGKILL');
+        state.ytdlpProcess = null;
         state.activeResource = null;
-        if (state.current?.filePath === batch[0].filePath) state.current = batch[batch.length - 1];
+        if (trackKey(state.current) === trackKey(batch[0])) state.current = batch[batch.length - 1];
       }
     });
 
@@ -721,15 +839,15 @@ function createMusicService({ client, config, stateStore }) {
   function appendTracks(state, tracks) {
     const ordered = orderTracksForMood(tracks, state.mood);
     const occupied = new Set([
-      state.current?.filePath,
-      ...state.queue.map((track) => track.filePath),
+      trackKey(state.current),
+      ...state.queue.map((track) => trackKey(track)),
     ].filter(Boolean));
     const additions = state.smartQueue
-      ? ordered.filter((track) => !occupied.has(track.filePath))
+      ? ordered.filter((track) => !occupied.has(trackKey(track)))
       : ordered;
 
     state.playlist = state.smartQueue
-      ? [...new Map([...state.playlist, ...ordered].map((track) => [track.filePath, track])).values()]
+      ? [...new Map([...state.playlist, ...ordered].map((track) => [trackKey(track), track])).values()]
       : ordered.slice();
     state.queue.push(...additions);
     return additions;
@@ -737,7 +855,7 @@ function createMusicService({ client, config, stateStore }) {
 
   async function enqueueTrack(message, query = '', playlistName = '') {
     const state = getState(message.guild.id);
-    const tracks = playlistName ? collectPlaylistTracks(playlistName, query) : collectPlayableTracks(query);
+    const tracks = collectInputTracks(query, playlistName);
     if (tracks.length === 0) throw new Error(`Không tìm thấy file nhạc trong thư mục ${config.MUSIC_DIR}.`);
     await ensureVoiceConnection(message);
     state.textChannelId = message.channel.id;
@@ -749,7 +867,7 @@ function createMusicService({ client, config, stateStore }) {
 
   async function enqueueTrackFromInteraction(interaction, query = '', playlistName = '') {
     const state = getState(interaction.guild.id);
-    const tracks = playlistName ? collectPlaylistTracks(playlistName, query) : collectPlayableTracks(query);
+    const tracks = collectInputTracks(query, playlistName);
     if (tracks.length === 0) throw new Error(`Không tìm thấy file nhạc trong thư mục ${config.MUSIC_DIR}.`);
     await ensureVoiceConnectionFromInteraction(interaction);
     state.textChannelId = interaction.channelId;
@@ -794,6 +912,10 @@ function createMusicService({ client, config, stateStore }) {
       if (state.ffmpegProcess && !state.ffmpegProcess.killed) {
         state.ffmpegProcess.kill('SIGKILL');
         state.ffmpegProcess = null;
+      }
+      if (state.ytdlpProcess && !state.ytdlpProcess.killed) {
+        state.ytdlpProcess.kill('SIGKILL');
+        state.ytdlpProcess = null;
       }
       state.player.stop(true);
     },

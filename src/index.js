@@ -71,6 +71,7 @@ client.once('clientReady', () => {
   console.log(`Logged in as ${client.user.tag}`);
   console.log(`Music dir: ${config.MUSIC_DIR}`);
   console.log(`FFmpeg: ${config.FFMPEG_PATH}`);
+  console.log(`yt-dlp: ${config.YTDLP_PATH}`);
   console.log(
     `Gemini AI: ${ai.active ? `on (${config.GEMINI_MODEL})` : config.AI_ENABLED ? 'configured but missing GEMINI_API_KEY' : 'off'}`
   );
