@@ -24,6 +24,7 @@ Bot Discord đơn giản để phát nhạc từ file local như `.mp3`, `.wav`,
 - Slash command phản hồi bằng embed PeachBot màu hồng, có tiêu đề và trạng thái dễ đọc.
 - `/panel` có nút `Play all`, `Pause`, `Resume`, `Skip`, `Stop`, `Shuffle`, `Random`, `Clear`, `Leave`, `Refresh` và menu chọn `Repeat`/`Volume`.
 - `/join` cũng tự mở panel sau khi bot vào voice channel.
+- Gemini AI có thể đọc lịch sử gần nhất, chỉ trả lời khi người dùng đang gọi Peach, và react tin nhắn bằng emoji phù hợp.
 
 ## Cấu trúc
 
@@ -40,7 +41,7 @@ fnm exec --using v25.9.0 npm install
 
 2. Tạo file `.env` từ `.env.example` và điền `DISCORD_TOKEN`
    - Nên điền thêm `DISCORD_GUILD_ID` để slash commands xuất hiện ngay trong server test
-   - Không cần bật `Message Content Intent` nếu chỉ dùng slash commands
+   - Nếu bật Gemini AI, đặt `AI_ENABLED=true`, điền `GEMINI_API_KEY`, sau đó bật `Message Content Intent` trong Discord Developer Portal
 
 3. Khởi động bot:
 
@@ -49,6 +50,24 @@ fnm exec --using v25.9.0 npm start
 ```
 
 Sau khi bot chạy, gõ `/panel` trong một text channel. Nếu command chưa xuất hiện, hãy kiểm tra `DISCORD_GUILD_ID` trong `.env` rồi restart bot để đăng ký lại slash commands trong server.
+
+### Gemini AI
+
+Google AI Studio cung cấp Gemini API key; SDK chính thức dùng package `@google/genai`. Khi `AI_ENABLED=true`, bot gửi lịch sử tối đa `AI_HISTORY_LIMIT` tin nhắn của channel sang Gemini để phân loại và tạo câu trả lời. Mặc định bot tự lấy ID voice channel mà nó đang join; khi bot chuyển room, channel AI cũng tự chuyển theo. Có thể đặt `AI_CHANNEL_ID` nếu muốn khóa cố định một channel.
+
+Các biến liên quan:
+
+```env
+AI_ENABLED=true
+GEMINI_API_KEY=your-google-gemini-api-key
+GEMINI_MODEL=gemini-2.5-flash-lite
+AI_CHANNEL_ID=
+AI_USE_CURRENT_VOICE_CHANNEL=true
+AI_ONLY_VOICE_CHANNEL=true
+AI_REQUIRE_BOT_IN_VOICE=false
+```
+
+Nội dung tin nhắn và lịch sử được gửi tới Google Gemini khi tính năng bật; không bật AI trong các channel không muốn đưa dữ liệu ra ngoài.
 
 ## Chạy bằng Docker Compose
 
