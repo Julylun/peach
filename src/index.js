@@ -255,6 +255,23 @@ async function generateGeminiWithRetries(ai, request) {
   throw lastError;
 }
 
+async function startAiTyping(message) {
+  if (typeof message.channel?.sendTyping !== 'function') return () => {};
+
+  try {
+    await message.channel.sendTyping();
+  } catch (error) {
+    console.warn(`[ai:${message.channelId}] typing indicator failed: ${error.message}`);
+    return () => {};
+  }
+
+  const timer = setInterval(() => {
+    message.channel.sendTyping().catch(() => {});
+  }, 8_000);
+
+  return () => clearInterval(timer);
+}
+
 async function askGeminiAboutMessage(message, context) {
   const ai = getGeminiClient();
   if (!ai) return null;
@@ -312,6 +329,7 @@ async function handleAiMessage(message) {
 
   aiCooldowns.set(channelId, now);
   aiInFlightChannels.add(channelId);
+  const stopTyping = await startAiTyping(message);
 
   try {
     const context = await fetchAiContext(message);
@@ -340,6 +358,7 @@ async function handleAiMessage(message) {
       attempts: AI_API_RETRIES + 1,
     });
   } finally {
+    stopTyping();
     aiInFlightChannels.delete(channelId);
   }
 }

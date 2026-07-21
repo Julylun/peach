@@ -71,6 +71,8 @@ Nội dung tin nhắn, lịch sử và tối đa `AI_IMAGE_MAX_COUNT` ảnh đí
 
 Gemini sẽ retry tối đa `AI_API_RETRIES` lần sau lần gọi đầu với lỗi mạng, timeout, rate limit `429` hoặc lỗi server `5xx`, dùng exponential backoff. Lỗi API key/model/request không hợp lệ sẽ debug ngay.
 
+Trong lúc đọc lịch sử, tải ảnh và chờ Gemini generate/retry, bot sẽ hiển thị trạng thái đang nhập trong channel.
+
 ## Chạy bằng Docker Compose
 
 Docker sẽ tự đọc `DISCORD_TOKEN` và các cấu hình khác từ file `.env`. Thư mục `music/` trên máy được mount vào `/app/music` trong container, nên thêm hoặc xóa nhạc không cần build lại image.
