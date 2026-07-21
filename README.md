@@ -25,6 +25,8 @@ Bot Discord đơn giản để phát nhạc từ file local như `.mp3`, `.wav`,
 - `/panel` có nút `Play all`, `Pause`, `Resume`, `Skip`, `Stop`, `Shuffle`, `Random`, `Clear`, `Leave`, `Refresh` và menu chọn `Repeat`/`Volume`.
 - `/join` cũng tự mở panel sau khi bot vào voice channel.
 - Gemini AI có thể đọc lịch sử gần nhất, chỉ trả lời khi người dùng đang gọi Peach, và react tin nhắn bằng emoji phù hợp. Peach có thể dùng nhiều emoji Unicode trong câu trả lời, không bị giới hạn ở một danh sách cố định.
+- Peach hiểu một số yêu cầu DJ tự nhiên trong voice chat như “phát playlist”, “tạm dừng”, “phát tiếp”, “skip”, “dừng nhạc”, “rời voice” và “xem trạng thái”, không cần gõ slash command.
+- Nếu Peach đang xử lý một tin nhắn mà có tin nhắn mới gọi bot, Peach giữ lại tin nhắn mới nhất để xử lý tiếp thay vì bỏ qua.
 
 ## Cấu trúc
 

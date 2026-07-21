@@ -32,7 +32,7 @@ const client = new Client({
 });
 
 const music = createMusicService({ client, config });
-const ai = createAiService({ client, config });
+const ai = createAiService({ client, config, music });
 const ui = createUiService({ music, config });
 const commands = createCommandService({ client, config, music, ui });
 

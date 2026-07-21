@@ -26,10 +26,11 @@ const MODEL_DISCLOSURE_PATTERN = [
   /internal\s+instruction/i,
 ];
 
-function createAiService({ client, config }) {
+function createAiService({ client, config, music }) {
   const active = config.AI_ENABLED && Boolean(config.GEMINI_API_KEY);
   const aiCooldowns = new Map();
   const aiInFlightChannels = new Set();
+  const aiPendingMessages = new Map();
   let models = null;
 
   function getModels() {
@@ -294,9 +295,12 @@ function createAiService({ client, config }) {
 
   function normalizeAnalysis(result) {
     const confidence = Number(result?.confidence);
+    const actions = new Set(['none', 'play', 'pause', 'resume', 'skip', 'stop', 'leave', 'status']);
     return {
       mentioned: result?.mentioned === true,
       confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0,
+      action: actions.has(result?.action) ? result.action : 'none',
+      query: typeof result?.query === 'string' ? result.query.trim().slice(0, 160) : '',
       reason: typeof result?.reason === 'string' ? result.reason.slice(0, 300) : '',
     };
   }
@@ -328,6 +332,48 @@ function createAiService({ client, config }) {
     return reply;
   }
 
+  async function executeMusicAction(message, analysisResult) {
+    if (!music || analysisResult.action === 'none') return '';
+
+    try {
+      const state = music.getState(message.guild.id);
+      switch (analysisResult.action) {
+        case 'play': {
+          const tracks = await music.enqueueTrack(message, analysisResult.query);
+          return `Đã thêm ${tracks.length} bài vào playlist${analysisResult.query ? ` theo từ khóa ${analysisResult.query}` : ''}.`;
+        }
+        case 'pause':
+          if (state.player.state.status !== music.activePlayerStatus.Playing) return 'Không có bài đang phát để tạm dừng.';
+          state.player.pause();
+          return 'Đã tạm dừng bài đang phát.';
+        case 'resume':
+          return state.player.unpause() ? 'Đã phát tiếp bài nhạc.' : 'Không có bài nào đang tạm dừng.';
+        case 'skip':
+          if (!state.current) return 'Không có bài đang phát để chuyển.';
+          state.player.stop(true);
+          return 'Đã chuyển bài.';
+        case 'stop':
+          music.stopState(state);
+          return 'Đã dừng nhạc và xóa hàng đợi.';
+        case 'leave':
+          music.cleanupGuild(message.guild.id);
+          return 'Đã rời voice channel.';
+        case 'status':
+          return `Trạng thái hiện tại: ${music.getVoiceStatusSummary(message.guild)}`;
+        default:
+          return '';
+      }
+    } catch (error) {
+      console.error(`[ai:${message.channelId}] music action failed`, {
+        action: analysisResult.action,
+        errorName: error?.name,
+        errorCode: error?.code,
+        errorMessage: error?.message,
+      });
+      return 'Thao tác DJ chưa thực hiện được. Hãy kiểm tra voice channel và quyền của bot.';
+    }
+  }
+
   async function analyze(history) {
     const { analysis } = getModels();
     const messages = await stageOnePrompt.formatMessages({
@@ -337,7 +383,7 @@ function createAiService({ client, config }) {
     return normalizeAnalysis(await invokeWithRetries(analysis, messages, 'stage-1'));
   }
 
-  async function generateResponse(history, analysisResult) {
+  async function generateResponse(history, analysisResult, actionResult) {
     const { response } = getModels();
     const messages = await stageTwoPrompt.formatMessages({
       aliases: config.AI_NAME_ALIASES.join(', '),
@@ -346,6 +392,7 @@ function createAiService({ client, config }) {
         mentioned: analysisResult.mentioned,
         confidence: analysisResult.confidence,
       }),
+      action_result: escapeTagValue(actionResult || 'Không có thao tác DJ.'),
       history: toLangChainHistory(history),
     });
     return normalizeResponse(await invokeWithRetries(response, messages, 'stage-2'));
@@ -356,8 +403,13 @@ function createAiService({ client, config }) {
 
     const channelId = message.channelId;
     const now = Date.now();
+    if (aiInFlightChannels.has(channelId)) {
+      aiPendingMessages.set(channelId, message);
+      return;
+    }
+
     const lastRequest = aiCooldowns.get(channelId) || 0;
-    if (now - lastRequest < config.AI_COOLDOWN_MS || aiInFlightChannels.has(channelId)) return;
+    if (now - lastRequest < config.AI_COOLDOWN_MS) return;
 
     aiCooldowns.set(channelId, now);
     aiInFlightChannels.add(channelId);
@@ -368,10 +420,12 @@ function createAiService({ client, config }) {
       const analysisResult = await analyze(history);
       if (!analysisResult.mentioned) return;
 
+      const actionResult = await executeMusicAction(message, analysisResult);
+
       // Stage 2 is the visible generation phase.
       const stopTyping = await startTyping(message);
       try {
-        const result = await generateResponse(history, analysisResult);
+        const result = await generateResponse(history, analysisResult, actionResult);
         const reaction = isSingleUnicodeEmoji(result.reaction) ? result.reaction : '🍑';
 
         await message.react(reaction).catch((error) => {
@@ -399,6 +453,16 @@ function createAiService({ client, config }) {
       });
     } finally {
       aiInFlightChannels.delete(channelId);
+      const pendingMessage = aiPendingMessages.get(channelId);
+      if (pendingMessage) {
+        aiPendingMessages.delete(channelId);
+        const elapsed = Date.now() - (aiCooldowns.get(channelId) || 0);
+        const delay = Math.max(0, config.AI_COOLDOWN_MS - elapsed);
+        const timer = setTimeout(() => {
+          void handleMessage(pendingMessage);
+        }, delay);
+        timer.unref?.();
+      }
     }
   }
 
