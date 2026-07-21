@@ -7,8 +7,9 @@ const {
   StringSelectMenuBuilder,
 } = require('discord.js');
 
-function createUiService({ music, config }) {
+function createUiService({ music, config, state: stateStore, social }) {
   const AudioPlayerStatus = music.activePlayerStatus;
+  const panelMessages = new Map();
 
   function cuteEmbed(title, description, color = 0xff9fbd) {
     return new EmbedBuilder()
@@ -39,6 +40,14 @@ function createUiService({ music, config }) {
       remove: 'Đã xóa khỏi queue',
       clear: 'Đã dọn queue',
       panel: 'Bảng điều khiển PeachBot',
+      mood: 'Mood DJ',
+      persona: 'Persona Peach',
+      atmosphere: 'Atmosphere',
+      radio: 'Radio Host',
+      smartqueue: 'Smart Queue',
+      remember: 'Memory Peach',
+      memory: 'Memory của bạn',
+      forgetme: 'Đã xóa memory',
     }[commandName] || 'PeachBot';
   }
 
@@ -84,6 +93,9 @@ function createUiService({ music, config }) {
     const queueLength = state?.queue?.length || 0;
     const hasTrack = Boolean(state?.current);
     const hasState = Boolean(state);
+    const settings = social?.getSettings(guild.id) || stateStore?.getGuildSettings(guild.id) || {};
+    const mood = settings.mood || 'auto';
+    const persona = settings.persona || config.DEFAULT_PERSONA;
 
     const embed = cuteEmbed(
       'PeachBot Music Panel',
@@ -94,6 +106,9 @@ function createUiService({ music, config }) {
         `🔊 **Âm lượng:** ${volume}%`,
         `🔁 **Repeat:** ${repeatLabel}`,
         `🎲 **Random:** ${randomLabel}`,
+        `🎭 **Mood / Persona:** ${mood} / ${persona}`,
+        `🧠 **Smart queue:** ${settings.smartQueue ? 'bật' : 'tắt'} · 🌿 **Atmosphere:** ${settings.atmosphere ? 'bật' : 'tắt'}`,
+        `📻 **Radio Host:** ${settings.radioHost ? 'bật' : 'tắt'}`,
         `📚 **Queue:** ${queueLength} bài đang chờ`,
         '',
         'Bấm nút hoặc chọn menu bên dưới để điều khiển nhạc nha 🍑',
@@ -150,6 +165,24 @@ function createUiService({ music, config }) {
         { label: '200%', description: 'Mức tối đa', value: '200', emoji: '🚀', default: volume === 200 },
       );
 
+    const settingsMenu = new StringSelectMenuBuilder()
+      .setCustomId(panelCustomId('settings', guild.id))
+      .setPlaceholder('🎛️ Chọn persona, mood hoặc social mode')
+      .addOptions(
+        { label: 'Persona Cute', description: 'Ngọt ngào, nhiều emoji', value: 'persona:cute', emoji: '🎀' },
+        { label: 'Persona Lofi', description: 'Nhẹ nhàng, chill', value: 'persona:lofi', emoji: '🌙' },
+        { label: 'Persona Chaotic', description: 'Lầy và năng lượng', value: 'persona:chaotic', emoji: '🌈' },
+        { label: 'Persona Formal', description: 'Gọn gàng, lịch sự', value: 'persona:formal', emoji: '📚' },
+        { label: 'Mood tự động', description: 'Để Peach tự chọn', value: 'mood:auto', emoji: '🍑' },
+        { label: 'Mood chill', description: 'Ưu tiên lofi, calm, rain', value: 'mood:calm', emoji: '🌿' },
+        { label: 'Mood tập trung', description: 'Ưu tiên study, focus', value: 'mood:focus', emoji: '🎯' },
+        { label: 'Mood vui', description: 'Ưu tiên upbeat, dance', value: 'mood:happy', emoji: '☀️' },
+        { label: 'Mood ngủ', description: 'Ưu tiên night, ambient', value: 'mood:sleep', emoji: '🌙' },
+        { label: 'Bật/tắt atmosphere', description: 'Lời nhắc nhẹ khi phòng im', value: 'toggle:atmosphere', emoji: '🌿' },
+        { label: 'Bật/tắt radio host', description: 'Peach dẫn radio định kỳ', value: 'toggle:radio', emoji: '📻' },
+        { label: 'Bật/tắt smart queue', description: 'Tránh lặp bài gần đây', value: 'toggle:smartqueue', emoji: '🧠' },
+      );
+
     return {
       embeds: [embed],
       components: [
@@ -157,9 +190,28 @@ function createUiService({ music, config }) {
         tools,
         new ActionRowBuilder().addComponents(repeatMenu),
         new ActionRowBuilder().addComponents(volumeMenu),
+        new ActionRowBuilder().addComponents(settingsMenu),
       ],
     };
   }
+
+  function watchPanelMessage(message) {
+    if (!message?.id || !message.guild) return;
+    panelMessages.set(message.id, message);
+  }
+
+  async function refreshPanels() {
+    for (const [messageId, message] of panelMessages) {
+      try {
+        await message.edit(buildMusicPanel(message.guild));
+      } catch (error) {
+        if ([10008, 10003].includes(error?.code)) panelMessages.delete(messageId);
+      }
+    }
+  }
+
+  const refreshTimer = setInterval(() => void refreshPanels(), config.PANEL_REFRESH_SECONDS * 1_000);
+  refreshTimer.unref?.();
 
   async function handlePanelInteraction(interaction) {
     const [, scope, action, guildId] = interaction.customId.split(':');
@@ -219,6 +271,17 @@ function createUiService({ music, config }) {
           }
           break;
         }
+        case 'settings': {
+          const [kind, value] = (interaction.values?.[0] || '').split(':');
+          if (kind === 'persona') social?.setPersona(guildId, value);
+          if (kind === 'mood') social?.setMood(guildId, value);
+          if (kind === 'toggle') {
+            if (value === 'atmosphere') social?.toggleAtmosphere(guildId);
+            if (value === 'radio') social?.toggleRadio(guildId);
+            if (value === 'smartqueue') social?.toggleSmartQueue(guildId);
+          }
+          break;
+        }
         case 'leave':
           music.cleanupGuild(guildId);
           break;
@@ -229,6 +292,7 @@ function createUiService({ music, config }) {
       }
 
       await interaction.message.edit(buildMusicPanel(interaction.guild));
+      watchPanelMessage(interaction.message);
     } catch (error) {
       console.error(`[panel:${interaction.id}] failed`, error);
       await interaction.followUp({
@@ -243,6 +307,11 @@ function createUiService({ music, config }) {
     getInteractionTitle,
     getQueuePage,
     buildMusicPanel,
+    watchPanelMessage,
+    destroy() {
+      clearInterval(refreshTimer);
+      panelMessages.clear();
+    },
     handlePanelInteraction,
   };
 }

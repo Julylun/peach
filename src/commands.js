@@ -3,7 +3,7 @@ const {
   SlashCommandBuilder,
 } = require('discord.js');
 
-function createCommandService({ client, config, music, ui }) {
+function createCommandService({ client, config, music, ui, state, social }) {
   const AudioPlayerStatus = music.activePlayerStatus;
   const VoiceConnectionStatus = music.voiceStatus;
 
@@ -14,9 +14,15 @@ function createCommandService({ client, config, music, ui }) {
         .setName('play')
         .setDescription('Phát file nhạc local')
         .addStringOption((option) => option
+          .setName('playlist')
+          .setDescription('Chọn playlist từ thư mục music')
+          .setAutocomplete(true)
+          .setRequired(false))
+        .addStringOption((option) => option
           .setName('query')
           .setDescription('Bộ lọc tùy chọn cho file trong thư mục music')
           .setRequired(false)),
+      new SlashCommandBuilder().setName('playlists').setDescription('Xem các playlist trong thư mục music'),
       new SlashCommandBuilder().setName('pause').setDescription('Tạm dừng bài đang phát'),
       new SlashCommandBuilder().setName('resume').setDescription('Tiếp tục phát bài'),
       new SlashCommandBuilder()
@@ -85,6 +91,54 @@ function createCommandService({ client, config, music, ui }) {
           .setDescription('Bật hoặc tắt random; bỏ trống để đảo trạng thái')
           .setRequired(false)),
       new SlashCommandBuilder().setName('shuffle').setDescription('Xáo trộn các bài đang chờ'),
+      new SlashCommandBuilder()
+        .setName('mood')
+        .setDescription('Đổi mood để Peach sắp xếp playlist thông minh')
+        .addStringOption((option) => option
+          .setName('value')
+          .setDescription('Mood của playlist')
+          .setRequired(true)
+          .addChoices(
+            { name: 'Tự động', value: 'auto' },
+            { name: 'Chill', value: 'calm' },
+            { name: 'Tập trung', value: 'focus' },
+            { name: 'Vui', value: 'happy' },
+            { name: 'Buồn', value: 'sad' },
+            { name: 'Năng lượng', value: 'energetic' },
+            { name: 'Ngủ', value: 'sleep' },
+            { name: 'Lãng mạn', value: 'romantic' },
+          )),
+      new SlashCommandBuilder()
+        .setName('persona')
+        .setDescription('Chọn tính cách phản hồi của Peach')
+        .addStringOption((option) => option
+          .setName('value')
+          .setDescription('Persona')
+          .setRequired(true)
+          .addChoices(
+            { name: 'Cute', value: 'cute' },
+            { name: 'Lofi', value: 'lofi' },
+            { name: 'Chaotic', value: 'chaotic' },
+            { name: 'Formal', value: 'formal' },
+          )),
+      new SlashCommandBuilder()
+        .setName('atmosphere')
+        .setDescription('Bật/tắt lời nhắc không khí trong voice room')
+        .addBooleanOption((option) => option.setName('enabled').setDescription('Bật hoặc tắt').setRequired(false)),
+      new SlashCommandBuilder()
+        .setName('radio')
+        .setDescription('Bật/tắt Radio Host của Peach')
+        .addBooleanOption((option) => option.setName('enabled').setDescription('Bật hoặc tắt').setRequired(false)),
+      new SlashCommandBuilder()
+        .setName('smartqueue')
+        .setDescription('Bật/tắt queue thông minh, tránh lặp bài gần đây')
+        .addBooleanOption((option) => option.setName('enabled').setDescription('Bật hoặc tắt').setRequired(false)),
+      new SlashCommandBuilder()
+        .setName('remember')
+        .setDescription('Lưu một ghi chú riêng cho Peach nhớ')
+        .addStringOption((option) => option.setName('note').setDescription('Ghi chú cần lưu').setRequired(true)),
+      new SlashCommandBuilder().setName('forgetme').setDescription('Xóa toàn bộ memory của bạn'),
+      new SlashCommandBuilder().setName('memory').setDescription('Xem memory Peach đang lưu của bạn'),
     ].map((command) => command.toJSON());
   }
 
@@ -111,13 +165,31 @@ function createCommandService({ client, config, music, ui }) {
 
   async function handleJoin(message) {
     await music.ensureVoiceConnection(message);
-    await message.reply(ui.buildMusicPanel(message.guild));
+    const panel = await message.reply(ui.buildMusicPanel(message.guild));
+    ui.watchPanelMessage(panel);
   }
 
   async function handlePlay(message, args) {
+    let playlist = '';
+    const playlistArgument = args.find((arg) => /^(?:playlist|pl)[:=]/i.test(arg));
+    if (playlistArgument) {
+      playlist = playlistArgument.replace(/^(?:playlist|pl)[:=]/i, '');
+      args = args.filter((arg) => arg !== playlistArgument);
+    }
     const query = args.join(' ');
-    const tracks = await music.enqueueTrack(message, query);
-    await message.reply(`Đã thêm ${tracks.length} bài vào hàng đợi${query ? ` theo lọc \`${query}\`` : ''}.`);
+    const tracks = await music.enqueueTrack(message, query, playlist);
+    await message.reply(
+      `Đã thêm ${tracks.length} bài vào hàng đợi` +
+      `${playlist ? ` từ playlist **${playlist}**` : ''}${query ? ` theo lọc \`${query}\`` : ''}.`
+    );
+  }
+
+  function handlePlaylists(message) {
+    const playlists = music.listPlaylists();
+    const lines = playlists.length > 0
+      ? playlists.map((playlist, index) => `${index + 1}. \`${playlist}\``)
+      : ['Chưa có playlist nào. Hãy tạo folder con trong thư mục music/.'];
+    message.reply(`Playlist hiện có:\n${lines.join('\n')}`).catch(() => {});
   }
 
   function handlePause(message) {
@@ -214,6 +286,45 @@ function createCommandService({ client, config, music, ui }) {
     message.reply(`Đã xáo trộn ${state.queue.length} bài đang chờ.`).catch(() => {});
   }
 
+  function handleMood(message, value) {
+    const mood = social.setMood(message.guild.id, value || 'auto');
+    message.reply(`Mood playlist: **${mood}** 🎧✨`).catch(() => {});
+  }
+
+  function handlePersona(message, value) {
+    const settings = social.setPersona(message.guild.id, value || config.DEFAULT_PERSONA);
+    message.reply(`Persona của Peach: **${settings.persona}** 🍑`).catch(() => {});
+  }
+
+  function handleSocialToggle(message, setting, value) {
+    const handlers = {
+      atmosphere: social.toggleAtmosphere,
+      radio: social.toggleRadio,
+      smartqueue: social.toggleSmartQueue,
+    };
+    const handler = handlers[setting];
+    if (!handler) throw new Error('Không có setting này.');
+    const current = social.getSettings(message.guild.id);
+    const enabled = parseToggle(value, current[setting === 'smartqueue' ? 'smartQueue' : setting === 'radio' ? 'radioHost' : 'atmosphere']);
+    const result = handler(message.guild.id, enabled);
+    message.reply(`${setting}: **${result ? 'bật' : 'tắt'}** ${setting === 'atmosphere' ? '🌿' : setting === 'radio' ? '📻' : '🧠'}`).catch(() => {});
+  }
+
+  function handleRemember(message, note) {
+    if (!note) throw new Error('Hãy nhập nội dung cần nhớ.');
+    const memory = state.remember(message.guild.id, message.author.id, note);
+    message.reply(`Peach nhớ thêm rồi nha 🍑\n${memory.notes.map((item, index) => `${index + 1}. ${item}`).join('\n')}`).catch(() => {});
+  }
+
+  function handleForgetMe(message) {
+    state.forgetUser(message.guild.id, message.author.id);
+    message.reply('Peach đã quên toàn bộ memory của bạn rồi 🧹✨').catch(() => {});
+  }
+
+  function handleMemory(message) {
+    message.reply(`Memory của bạn:\n${state.formatMemory(message.guild.id, message.author.id)}`).catch(() => {});
+  }
+
   function handleQueue(message, args) {
     const state = music.getState(message.guild.id);
     if (args.length > 0 && /^\d+$/.test(args[0])) {
@@ -267,6 +378,8 @@ function createCommandService({ client, config, music, ui }) {
       'Lệnh hiện có:',
       `\`${config.PREFIX}join\` - vào voice channel của bạn`,
       `\`${config.PREFIX}play [lọc]\` - phát toàn bộ nhạc local hoặc lọc theo từ khóa`,
+      `\`${config.PREFIX}play playlist:lofi\` - phát một playlist trong music/`,
+      `\`${config.PREFIX}playlists\` - xem playlist hiện có`,
       `\`${config.PREFIX}pause\` / \`${config.PREFIX}resume\` - tạm dừng/tiếp tục`,
       `\`${config.PREFIX}volume <0-200>\` - chỉnh âm lượng`,
       `\`${config.PREFIX}nowplaying\` - xem bài đang phát`,
@@ -278,6 +391,11 @@ function createCommandService({ client, config, music, ui }) {
       `\`${config.PREFIX}repeat off|one|all\` - chế độ lặp`,
       `\`${config.PREFIX}random [on|off]\` - chọn bài kế tiếp ngẫu nhiên`,
       `\`${config.PREFIX}shuffle\` - xáo trộn queue`,
+      `\`${config.PREFIX}mood <auto|calm|focus|happy|sad|energetic|sleep|romantic>\` - mood DJ`,
+      `\`${config.PREFIX}persona <cute|lofi|chaotic|formal>\` - tính cách Peach`,
+      `\`${config.PREFIX}atmosphere [on|off]\` / \`${config.PREFIX}radio [on|off]\` - social mode`,
+      `\`${config.PREFIX}smartqueue [on|off]\` - queue thông minh`,
+      `\`${config.PREFIX}remember <ghi chú>\` / \`${config.PREFIX}memory\` / \`${config.PREFIX}forgetme\` - memory có kiểm soát`,
       `\`${config.PREFIX}leave\` - rời voice channel`,
       `\`${config.PREFIX}status\` - xem trạng thái bot`,
     ].join('\n');
@@ -298,6 +416,10 @@ function createCommandService({ client, config, music, ui }) {
           break;
         case 'play':
           await handlePlay(message, args);
+          break;
+        case 'playlists':
+        case 'playlist':
+          handlePlaylists(message);
           break;
         case 'pause':
           handlePause(message);
@@ -341,6 +463,26 @@ function createCommandService({ client, config, music, ui }) {
         case 'shuffle':
           handleShuffle(message);
           break;
+        case 'mood':
+          handleMood(message, args[0]);
+          break;
+        case 'persona':
+          handlePersona(message, args[0]);
+          break;
+        case 'atmosphere':
+        case 'radio':
+        case 'smartqueue':
+          handleSocialToggle(message, command, args[0]);
+          break;
+        case 'remember':
+          handleRemember(message, args.join(' '));
+          break;
+        case 'memory':
+          handleMemory(message);
+          break;
+        case 'forgetme':
+          handleForgetMe(message);
+          break;
         case 'leave':
         case 'disconnect':
           handleLeave(message);
@@ -375,7 +517,10 @@ function createCommandService({ client, config, music, ui }) {
           embeds: [ui.cuteEmbed(ui.getInteractionTitle(interaction.commandName), content)],
         });
       } else if (content) {
-        await interaction.editReply(content);
+        const reply = await interaction.editReply(content);
+        if (interaction.commandName === 'join' || interaction.commandName === 'panel') {
+          ui.watchPanelMessage(reply);
+        }
       } else {
         await interaction.editReply('Xong.');
       }
@@ -403,7 +548,33 @@ function createCommandService({ client, config, music, ui }) {
     }
   }
 
+  async function handleAutocomplete(interaction) {
+    if (interaction.commandName !== 'play') return;
+    const focusedOption = interaction.options.getFocused(true);
+    if (focusedOption.name !== 'playlist') {
+      await interaction.respond([]);
+      return;
+    }
+    const focused = focusedOption.value.toLowerCase();
+    const choices = music.listPlaylists()
+      .filter((playlist) => playlist.toLowerCase().includes(focused))
+      .slice(0, 25)
+      .map((playlist) => ({
+        name: playlist === 'all' ? 'all - toàn bộ nhạc trong music/' : playlist,
+        value: playlist,
+      }));
+    await interaction.respond(choices);
+  }
+
   async function handleInteraction(interaction) {
+    if (interaction.isAutocomplete()) {
+      await handleAutocomplete(interaction).catch((error) => {
+        console.error(`[autocomplete:${interaction.id}] failed`, error);
+        interaction.respond([]).catch(() => {});
+      });
+      return;
+    }
+
     if (interaction.isButton() || interaction.isStringSelectMenu()) {
       await ui.handlePanelInteraction(interaction);
       return;
@@ -427,8 +598,20 @@ function createCommandService({ client, config, music, ui }) {
       case 'play':
         await respondToInteraction(interaction, async () => {
           const query = interaction.options.getString('query') || '';
-          const tracks = await music.enqueueTrackFromInteraction(interaction, query);
-          return `Đã thêm ${tracks.length} bài vào hàng đợi từ ${query.trim() ? `lọc \`${query.trim()}\`` : 'toàn bộ thư mục \`music/\`'}.`;
+          const playlist = interaction.options.getString('playlist') || '';
+          const tracks = await music.enqueueTrackFromInteraction(interaction, query, playlist);
+          const source = playlist
+            ? `playlist \`${playlist}\``
+            : query.trim() ? `lọc \`${query.trim()}\`` : 'toàn bộ thư mục \`music/\`';
+          return `Đã thêm ${tracks.length} bài vào hàng đợi từ ${source}.`;
+        });
+        break;
+      case 'playlists':
+        await respondToInteraction(interaction, async () => {
+          const playlists = music.listPlaylists();
+          return playlists.length > 0
+            ? `Playlist hiện có:\n${playlists.map((playlist, index) => `${index + 1}. \`${playlist}\``).join('\n')}`
+            : 'Chưa có playlist nào. Hãy tạo folder con trong thư mục `music/`.';
         });
         break;
       case 'pause':
@@ -558,6 +741,54 @@ function createCommandService({ client, config, music, ui }) {
           const state = music.getState(interaction.guild.id);
           music.shuffleInPlace(state.queue);
           return `Đã xáo trộn ${state.queue.length} bài đang chờ.`;
+        });
+        break;
+      case 'mood':
+        await respondToInteraction(interaction, async () => {
+          const mood = social.setMood(interaction.guild.id, interaction.options.getString('value'));
+          return `Mood playlist: **${mood}** 🎧✨`;
+        });
+        break;
+      case 'persona':
+        await respondToInteraction(interaction, async () => {
+          const settings = social.setPersona(interaction.guild.id, interaction.options.getString('value'));
+          return `Persona của Peach: **${settings.persona}** 🍑`;
+        });
+        break;
+      case 'atmosphere':
+      case 'radio':
+      case 'smartqueue':
+        await respondToInteraction(interaction, async () => {
+          const setting = command;
+          const current = social.getSettings(interaction.guild.id);
+          const key = setting === 'smartqueue' ? 'smartQueue' : setting === 'radio' ? 'radioHost' : setting;
+          const enabled = interaction.options.getBoolean('enabled') ?? !current[key];
+          const handlers = {
+            atmosphere: social.toggleAtmosphere,
+            radio: social.toggleRadio,
+            smartqueue: social.toggleSmartQueue,
+          };
+          const result = handlers[setting](interaction.guild.id, enabled);
+          return `${setting}: **${result ? 'bật' : 'tắt'}** ${setting === 'atmosphere' ? '🌿' : setting === 'radio' ? '📻' : '🧠'}`;
+        });
+        break;
+      case 'remember':
+        await respondToInteraction(interaction, async () => {
+          const memory = state.remember(
+            interaction.guild.id,
+            interaction.user.id,
+            interaction.options.getString('note')
+          );
+          return `Peach nhớ thêm rồi nha 🍑\n${memory.notes.map((item, index) => `${index + 1}. ${item}`).join('\n')}`;
+        });
+        break;
+      case 'memory':
+        await respondToInteraction(interaction, async () => `Memory của bạn:\n${state.formatMemory(interaction.guild.id, interaction.user.id)}`);
+        break;
+      case 'forgetme':
+        await respondToInteraction(interaction, async () => {
+          state.forgetUser(interaction.guild.id, interaction.user.id);
+          return 'Peach đã quên toàn bộ memory của bạn rồi 🧹✨';
         });
         break;
       default:

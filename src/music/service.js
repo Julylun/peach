@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { EventEmitter } = require('events');
 const { PermissionsBitField } = require('discord.js');
 const {
   AudioPlayerStatus,
@@ -12,9 +13,24 @@ const {
   entersState,
 } = require('@discordjs/voice');
 
-function createMusicService({ client, config }) {
+function createMusicService({ client, config, stateStore }) {
   const guildStates = new Map();
   const observedNetworkings = new WeakSet();
+  const events = new EventEmitter();
+  const SUPPORTED_AUDIO_EXTENSIONS = [
+    '.mp3', '.wav', '.ogg', '.oga', '.opus', '.m4a', '.m4b',
+    '.flac', '.aac', '.webm', '.weba', '.mka',
+  ];
+  const MOODS = ['auto', 'calm', 'focus', 'happy', 'sad', 'energetic', 'sleep', 'romantic'];
+  const MOOD_KEYWORDS = {
+    calm: ['calm', 'chill', 'lofi', 'relax', 'ambient', 'piano', 'rain'],
+    focus: ['focus', 'study', 'instrumental', 'deep', 'concentration', 'work'],
+    happy: ['happy', 'upbeat', 'fun', 'summer', 'party', 'dance'],
+    sad: ['sad', 'rain', 'melancholy', 'blue', 'piano', 'night'],
+    energetic: ['energy', 'rock', 'workout', 'dance', 'boost', 'intense'],
+    sleep: ['sleep', 'night', 'ambient', 'rain', 'calm', 'lofi'],
+    romantic: ['love', 'romantic', 'acoustic', 'piano', 'heart'],
+  };
 
   function redactVoiceDebug(message) {
     return String(message)
@@ -116,6 +132,8 @@ function createMusicService({ client, config }) {
         playlist: [],
         repeatMode: config.LOOP_PLAYLIST_DEFAULT ? 'all' : config.REPEAT_MODE_DEFAULT,
         randomEnabled: config.RANDOM_NEXT_DEFAULT,
+        smartQueue: stateStore?.getGuildSettings(guildId).smartQueue ?? config.SMART_QUEUE_DEFAULT,
+        mood: stateStore?.getGuildSettings(guildId).mood || config.MOOD_DEFAULT,
         current: null,
         activeResource: null,
         invalidTracks: new Set(),
@@ -126,6 +144,7 @@ function createMusicService({ client, config }) {
         textChannelId: null,
         waitingForReady: false,
         voiceReconnectAttempts: 0,
+        recentTracks: [],
       };
 
       player.on(AudioPlayerStatus.Idle, () => {
@@ -254,15 +273,30 @@ function createMusicService({ client, config }) {
   }
 
   function collectPlayableTracks(filterText = '') {
+    return collectPlayableTracksFromDirectory(filterText, config.MUSIC_DIR, '');
+  }
+
+  function getTrackPlaylistName(filePath) {
+    const relative = formatRelative(filePath);
+    const [firstPart] = relative.split('/');
+    return relative.includes('/') ? firstPart : 'default';
+  }
+
+  function collectPlayableTracksFromDirectory(filterText = '', rootDir = config.MUSIC_DIR, playlistName = '') {
     const items = [];
     const lowerFilter = filterText.trim().toLowerCase();
 
-    walkMusicDir(config.MUSIC_DIR, (filePath) => {
+    walkMusicDir(rootDir, (filePath) => {
       if (!isPlayableFile(filePath)) return;
+      if (playlistName === 'default' && path.dirname(filePath) !== rootDir) return;
 
       const rel = formatRelative(filePath);
       if (!lowerFilter || rel.toLowerCase().includes(lowerFilter)) {
-        items.push({ filePath, displayName: rel });
+        items.push({
+          filePath,
+          displayName: rel,
+          playlist: playlistName || getTrackPlaylistName(filePath),
+        });
       }
     });
 
@@ -299,16 +333,28 @@ function createMusicService({ client, config }) {
     }
 
     if (state.queue.length === 0) refillLoopQueue(state);
-    while (state.queue.length > 0 && state.invalidTracks.has(state.queue[0].filePath)) state.queue.shift();
-    if (state.queue.length === 0) return null;
-    if (!state.randomEnabled) return state.queue.shift();
-
-    let randomIndex = Math.floor(Math.random() * state.queue.length);
-    while (randomIndex < state.queue.length && state.invalidTracks.has(state.queue[randomIndex].filePath)) {
-      randomIndex += 1;
+    const eligible = state.queue.filter((track) => !state.invalidTracks.has(track.filePath));
+    if (eligible.length === 0) {
+      state.queue.length = 0;
+      return null;
     }
-    if (randomIndex >= state.queue.length) return null;
-    return state.queue.splice(randomIndex, 1)[0];
+
+    let candidates = eligible;
+    if (state.smartQueue && eligible.length > 1) {
+      const fresh = eligible.filter((track) => !state.recentTracks.includes(track.filePath));
+      if (fresh.length > 0) candidates = fresh;
+    }
+
+    if (state.mood !== 'auto' && MOOD_KEYWORDS[state.mood]) {
+      const moodOrdered = orderTracksForMood(candidates, state.mood);
+      candidates = moodOrdered.slice(0, Math.max(1, Math.ceil(moodOrdered.length * 0.6)));
+    }
+
+    const chosen = state.randomEnabled
+      ? candidates[Math.floor(Math.random() * candidates.length)]
+      : candidates[0];
+    const randomIndex = state.queue.indexOf(chosen);
+    return randomIndex >= 0 ? state.queue.splice(randomIndex, 1)[0] : null;
   }
 
   function takeNextTracks(state, maxTracks) {
@@ -357,6 +403,8 @@ function createMusicService({ client, config }) {
       `Queue length: ${state?.queue?.length || 0}`,
       `Repeat: ${state?.repeatMode || 'off'}`,
       `Random next: ${state?.randomEnabled ? 'on' : 'off'}`,
+      `Smart queue: ${state?.smartQueue ? 'on' : 'off'}`,
+      `Mood: ${state?.mood || config.MOOD_DEFAULT}`,
       `Crossfade: ${config.CROSSFADE_SECONDS > 0 ? `${config.CROSSFADE_SECONDS}s` : 'off'}`,
     ];
 
@@ -459,7 +507,7 @@ function createMusicService({ client, config }) {
   }
 
   function isPlayableFile(filePath) {
-    return ['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac', '.webm'].includes(path.extname(filePath).toLowerCase());
+    return SUPPORTED_AUDIO_EXTENSIONS.includes(path.extname(filePath).toLowerCase());
   }
 
   function listTracks(filterText = '') {
@@ -476,6 +524,67 @@ function createMusicService({ client, config }) {
 
   function collectPlayableTracksByQuery(query = '') {
     return collectPlayableTracks(query);
+  }
+
+  function listPlaylists() {
+    if (!fs.existsSync(config.MUSIC_DIR)) return [];
+    const playlists = fs.readdirSync(config.MUSIC_DIR, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+      .map((entry) => entry.name);
+    const hasRootTracks = fs.readdirSync(config.MUSIC_DIR, { withFileTypes: true })
+      .some((entry) => entry.isFile() && isPlayableFile(entry.name));
+    if (hasRootTracks) playlists.unshift('default');
+    return ['all', ...playlists.sort((a, b) => a.localeCompare(b))];
+  }
+
+  function resolvePlaylistName(playlistName) {
+    const requested = String(playlistName || '').trim().toLowerCase();
+    if (!requested) return '';
+    return listPlaylists().find((name) => name.toLowerCase() === requested) || '';
+  }
+
+  function collectPlaylistTracks(playlistName, filterText = '') {
+    const resolved = resolvePlaylistName(playlistName);
+    if (!resolved) throw new Error(`Không tìm thấy playlist \`${playlistName}\`. Dùng /playlists để xem danh sách.`);
+    if (resolved === 'all') return collectPlayableTracks(filterText);
+    if (resolved === 'default') return collectPlayableTracksFromDirectory(filterText, config.MUSIC_DIR, 'default');
+    return collectPlayableTracksFromDirectory(
+      filterText,
+      path.join(config.MUSIC_DIR, resolved),
+      resolved
+    );
+  }
+
+  function orderTracksForMood(tracks, mood) {
+    if (!MOOD_KEYWORDS[mood]) return tracks.slice();
+    const keywords = MOOD_KEYWORDS[mood];
+    return tracks
+      .map((track, index) => ({
+        track,
+        index,
+        score: keywords.reduce((score, keyword) => (
+          track.displayName.toLowerCase().includes(keyword) ? score + 1 : score
+        ), 0),
+      }))
+      .sort((a, b) => b.score - a.score || a.index - b.index)
+      .map(({ track }) => track);
+  }
+
+  function setMood(guildId, mood) {
+    const normalized = MOODS.includes(mood) ? mood : 'auto';
+    const state = getState(guildId);
+    state.mood = normalized;
+    state.playlist = orderTracksForMood(state.playlist, normalized);
+    state.queue = orderTracksForMood(state.queue, normalized);
+    stateStore?.updateGuildSettings(guildId, { mood: normalized });
+    return normalized;
+  }
+
+  function setSmartQueue(guildId, enabled) {
+    const state = getState(guildId);
+    state.smartQueue = Boolean(enabled);
+    stateStore?.updateGuildSettings(guildId, { smartQueue: state.smartQueue });
+    return state.smartQueue;
   }
 
   function attachFfmpegLogging(ffmpegProcess, label, onFailure) {
@@ -563,6 +672,10 @@ function createMusicService({ client, config }) {
     }
 
     state.current = next;
+    state.recentTracks = [
+      next.filePath,
+      ...state.recentTracks.filter((filePath) => filePath !== next.filePath),
+    ].slice(0, 3);
     const handleFfmpegFailure = () => {
       if (batch.length > 1) {
         state.forceSingleNext = true;
@@ -602,30 +715,48 @@ function createMusicService({ client, config }) {
 
     const textChannel = client.channels.cache.get(state.textChannelId);
     if (textChannel?.isTextBased()) textChannel.send(`Đang phát: \`${next.displayName}\``).catch(() => {});
+    events.emit('trackStart', { guildId, track: next, textChannelId: state.textChannelId });
   }
 
-  async function enqueueTrack(message, query) {
+  function appendTracks(state, tracks) {
+    const ordered = orderTracksForMood(tracks, state.mood);
+    const occupied = new Set([
+      state.current?.filePath,
+      ...state.queue.map((track) => track.filePath),
+    ].filter(Boolean));
+    const additions = state.smartQueue
+      ? ordered.filter((track) => !occupied.has(track.filePath))
+      : ordered;
+
+    state.playlist = state.smartQueue
+      ? [...new Map([...state.playlist, ...ordered].map((track) => [track.filePath, track])).values()]
+      : ordered.slice();
+    state.queue.push(...additions);
+    return additions;
+  }
+
+  async function enqueueTrack(message, query = '', playlistName = '') {
     const state = getState(message.guild.id);
-    const tracks = collectPlayableTracks(query);
+    const tracks = playlistName ? collectPlaylistTracks(playlistName, query) : collectPlayableTracks(query);
     if (tracks.length === 0) throw new Error(`Không tìm thấy file nhạc trong thư mục ${config.MUSIC_DIR}.`);
     await ensureVoiceConnection(message);
     state.textChannelId = message.channel.id;
-    state.playlist = tracks.slice();
-    state.queue.push(...tracks);
+    const additions = appendTracks(state, tracks);
+    if (additions.length === 0) return [];
     if (state.player.state.status !== AudioPlayerStatus.Playing && !state.current) await playNext(message.guild.id);
-    return tracks;
+    return additions;
   }
 
-  async function enqueueTrackFromInteraction(interaction, query) {
+  async function enqueueTrackFromInteraction(interaction, query = '', playlistName = '') {
     const state = getState(interaction.guild.id);
-    const tracks = collectPlayableTracks(query);
+    const tracks = playlistName ? collectPlaylistTracks(playlistName, query) : collectPlayableTracks(query);
     if (tracks.length === 0) throw new Error(`Không tìm thấy file nhạc trong thư mục ${config.MUSIC_DIR}.`);
     await ensureVoiceConnectionFromInteraction(interaction);
     state.textChannelId = interaction.channelId;
-    state.playlist = tracks.slice();
-    state.queue.push(...tracks);
+    const additions = appendTracks(state, tracks);
+    if (additions.length === 0) return [];
     if (state.player.state.status !== AudioPlayerStatus.Playing && !state.current) await playNext(interaction.guild.id);
-    return tracks;
+    return additions;
   }
 
   function cleanupAll() {
@@ -647,6 +778,8 @@ function createMusicService({ client, config }) {
     enqueueTrack,
     enqueueTrackFromInteraction,
     collectPlayableTracks: collectPlayableTracksByQuery,
+    collectPlaylistTracks,
+    listPlaylists,
     listTracks,
     shuffleInPlace,
     playNext,
@@ -657,11 +790,19 @@ function createMusicService({ client, config }) {
       state.invalidTracks.clear();
       state.current = null;
       state.activeResource = null;
+      state.recentTracks = [];
       if (state.ffmpegProcess && !state.ffmpegProcess.killed) {
         state.ffmpegProcess.kill('SIGKILL');
         state.ffmpegProcess = null;
       }
       state.player.stop(true);
+    },
+    setMood,
+    setSmartQueue,
+    getMoodOptions: () => MOODS.slice(),
+    on(eventName, handler) {
+      events.on(eventName, handler);
+      return () => events.off(eventName, handler);
     },
   };
 }

@@ -5,5 +5,6 @@ coverage/
 *.log
 music/.DS_Store
 music/
+data/
 !src/music/
 !src/music/service.js

@@ -26,7 +26,7 @@ const MODEL_DISCLOSURE_PATTERN = [
   /internal\s+instruction/i,
 ];
 
-function createAiService({ client, config, music }) {
+function createAiService({ client, config, music, state }) {
   const active = config.AI_ENABLED && Boolean(config.GEMINI_API_KEY);
   const aiCooldowns = new Map();
   const aiInFlightChannels = new Set();
@@ -295,12 +295,15 @@ function createAiService({ client, config, music }) {
 
   function normalizeAnalysis(result) {
     const confidence = Number(result?.confidence);
-    const actions = new Set(['none', 'play', 'pause', 'resume', 'skip', 'stop', 'leave', 'status']);
+    const actions = new Set(['none', 'play', 'pause', 'resume', 'skip', 'stop', 'leave', 'status', 'mood']);
+    const moods = new Set(['auto', 'calm', 'focus', 'happy', 'sad', 'energetic', 'sleep', 'romantic']);
     return {
       mentioned: result?.mentioned === true,
       confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : 0,
       action: actions.has(result?.action) ? result.action : 'none',
       query: typeof result?.query === 'string' ? result.query.trim().slice(0, 160) : '',
+      playlist: typeof result?.playlist === 'string' ? result.playlist.trim().slice(0, 120) : '',
+      mood: moods.has(result?.mood) ? result.mood : 'auto',
       reason: typeof result?.reason === 'string' ? result.reason.slice(0, 300) : '',
     };
   }
@@ -339,8 +342,11 @@ function createAiService({ client, config, music }) {
       const state = music.getState(message.guild.id);
       switch (analysisResult.action) {
         case 'play': {
-          const tracks = await music.enqueueTrack(message, analysisResult.query);
-          return `Đã thêm ${tracks.length} bài vào playlist${analysisResult.query ? ` theo từ khóa ${analysisResult.query}` : ''}.`;
+          const tracks = await music.enqueueTrack(message, analysisResult.query, analysisResult.playlist);
+          const source = analysisResult.playlist
+            ? ` playlist ${analysisResult.playlist}`
+            : analysisResult.query ? ` theo từ khóa ${analysisResult.query}` : ' toàn bộ music/';
+          return `Đã thêm ${tracks.length} bài từ${source}.`;
         }
         case 'pause':
           if (state.player.state.status !== music.activePlayerStatus.Playing) return 'Không có bài đang phát để tạm dừng.';
@@ -360,6 +366,10 @@ function createAiService({ client, config, music }) {
           return 'Đã rời voice channel.';
         case 'status':
           return `Trạng thái hiện tại: ${music.getVoiceStatusSummary(message.guild)}`;
+        case 'mood': {
+          const mood = music.setMood(message.guild.id, analysisResult.mood);
+          return `Đã chuyển mood playlist sang ${mood}.`;
+        }
         default:
           return '';
       }
@@ -376,23 +386,28 @@ function createAiService({ client, config, music }) {
 
   async function analyze(history) {
     const { analysis } = getModels();
+    const playlists = music?.listPlaylists?.() || ['all'];
     const messages = await stageOnePrompt.formatMessages({
       aliases: config.AI_NAME_ALIASES.join(', '),
+      playlists: escapeTagValue(playlists.join(', ')),
       history: toLangChainHistory(history),
     });
     return normalizeAnalysis(await invokeWithRetries(analysis, messages, 'stage-1'));
   }
 
-  async function generateResponse(history, analysisResult, actionResult) {
+  async function generateResponse(message, history, analysisResult, actionResult) {
     const { response } = getModels();
+    const settings = state?.getGuildSettings(message.guild.id) || {};
     const messages = await stageTwoPrompt.formatMessages({
       aliases: config.AI_NAME_ALIASES.join(', '),
+      persona: escapeTagValue(settings.persona || config.DEFAULT_PERSONA),
       // Do not forward the classifier's free-form reason into the response prompt.
       analysis: JSON.stringify({
         mentioned: analysisResult.mentioned,
         confidence: analysisResult.confidence,
       }),
       action_result: escapeTagValue(actionResult || 'Không có thao tác DJ.'),
+      memory: escapeTagValue(state?.formatMemory(message.guild.id, message.author.id) || 'Không có memory được lưu.'),
       history: toLangChainHistory(history),
     });
     return normalizeResponse(await invokeWithRetries(response, messages, 'stage-2'));
@@ -425,7 +440,7 @@ function createAiService({ client, config, music }) {
       // Stage 2 is the visible generation phase.
       const stopTyping = await startTyping(message);
       try {
-        const result = await generateResponse(history, analysisResult, actionResult);
+        const result = await generateResponse(message, history, analysisResult, actionResult);
         const reaction = isSingleUnicodeEmoji(result.reaction) ? result.reaction : '🍑';
 
         await message.react(reaction).catch((error) => {

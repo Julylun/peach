@@ -8,6 +8,8 @@ const { config, ensureMusicDirectory } = require('./config');
 const { createAiService } = require('./ai/gemini');
 const { createCommandService } = require('./commands');
 const { createMusicService } = require('./music/service');
+const { createSocialService } = require('./social');
+const { createStateStore } = require('./state/store');
 const { createUiService } = require('./ui');
 
 if (!config.DISCORD_TOKEN) {
@@ -31,10 +33,14 @@ const client = new Client({
   partials: [Partials.Channel],
 });
 
-const music = createMusicService({ client, config });
-const ai = createAiService({ client, config, music });
-const ui = createUiService({ music, config });
-const commands = createCommandService({ client, config, music, ui });
+const state = createStateStore({ config });
+const music = createMusicService({ client, config, stateStore: state });
+const social = createSocialService({ client, config, state, music });
+const ai = createAiService({ client, config, music, state });
+const ui = createUiService({ music, config, state, social });
+const commands = createCommandService({ client, config, music, ui, state, social });
+
+music.on('trackStart', social.handleTrackStart);
 
 client.on('debug', (message) => {
   if (String(message).startsWith('[VOICE]')) {
@@ -43,6 +49,7 @@ client.on('debug', (message) => {
 });
 
 client.on('voiceStateUpdate', (oldState, newState) => {
+  social.handleVoiceStateUpdate(oldState, newState);
   if (newState.id !== client.user?.id) return;
 
   console.log(
@@ -75,6 +82,7 @@ client.once('clientReady', () => {
 client.on('messageCreate', async (message) => {
   if (!message.guild || message.author.bot) return;
 
+  social.handleMessage(message);
   void ai.handleMessage(message);
   await commands.handlePrefixMessage(message);
 });
@@ -85,6 +93,8 @@ client.on('interactionCreate', (interaction) => {
 
 function shutdown(signal) {
   console.log(`Received ${signal}, cleaning up voice connections...`);
+  social.destroy();
+  ui.destroy();
   music.cleanupAll();
   client.destroy();
   process.exit(0);

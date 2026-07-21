@@ -33,6 +33,7 @@ const config = {
   DISCORD_TOKEN: process.env.DISCORD_TOKEN || '',
   PREFIX: process.env.COMMAND_PREFIX || '!',
   MUSIC_DIR: path.resolve(process.env.MUSIC_DIR || path.join(process.cwd(), 'music')),
+  STATE_FILE: path.resolve(process.env.PEACH_STATE_FILE || path.join(process.cwd(), 'data', 'peach-state.json')),
   FFMPEG_PATH: resolveFfmpegPath(),
   ENABLE_PREFIX_COMMANDS: process.env.ENABLE_PREFIX_COMMANDS === 'true',
   GUILD_ID: process.env.DISCORD_GUILD_ID || '',
@@ -65,6 +66,22 @@ const config = {
     .split(',')
     .map((name) => name.trim())
     .filter(Boolean),
+  DEFAULT_PERSONA: ['cute', 'lofi', 'chaotic', 'formal'].includes(process.env.PEACH_PERSONA)
+    ? process.env.PEACH_PERSONA
+    : 'cute',
+  ATMOSPHERE_DEFAULT: process.env.ATMOSPHERE_ENABLED === 'true',
+  RADIO_HOST_DEFAULT: process.env.RADIO_HOST_ENABLED === 'true',
+  VOICE_GREETING_DEFAULT: process.env.VOICE_GREETING_ENABLED !== 'false',
+  SMART_QUEUE_DEFAULT: process.env.SMART_QUEUE_ENABLED !== 'false',
+  MOOD_DEFAULT: ['auto', 'calm', 'focus', 'happy', 'sad', 'energetic', 'sleep', 'romantic'].includes(process.env.PEACH_MOOD)
+    ? process.env.PEACH_MOOD
+    : 'auto',
+  MEMORY_ENABLED: process.env.PEACH_MEMORY_ENABLED !== 'false',
+  MEMORY_MAX_NOTES: parseNumberEnv('PEACH_MEMORY_MAX_NOTES', 5, 1, 20),
+  MEMORY_NOTE_MAX_CHARS: parseNumberEnv('PEACH_MEMORY_NOTE_MAX_CHARS', 240, 40, 500),
+  PANEL_REFRESH_SECONDS: parseNumberEnv('PANEL_REFRESH_SECONDS', 15, 5, 120),
+  ATMOSPHERE_IDLE_MINUTES: parseNumberEnv('ATMOSPHERE_IDLE_MINUTES', 10, 2, 120),
+  RADIO_HOST_EVERY_TRACKS: parseNumberEnv('RADIO_HOST_EVERY_TRACKS', 3, 1, 20),
 };
 
 function ensureMusicDirectory() {
