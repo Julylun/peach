@@ -67,7 +67,9 @@ AI_ONLY_VOICE_CHANNEL=true
 AI_REQUIRE_BOT_IN_VOICE=false
 ```
 
-Nội dung tin nhắn và lịch sử được gửi tới Google Gemini khi tính năng bật; không bật AI trong các channel không muốn đưa dữ liệu ra ngoài.
+Nội dung tin nhắn, lịch sử và tối đa `AI_IMAGE_MAX_COUNT` ảnh đính kèm ở tin nhắn cuối được gửi tới Google Gemini khi tính năng bật. Ảnh vượt `AI_IMAGE_MAX_BYTES` sẽ bị bỏ qua; không bật AI trong các channel không muốn đưa dữ liệu ra ngoài.
+
+Gemini sẽ retry tối đa `AI_API_RETRIES` lần sau lần gọi đầu với lỗi mạng, timeout, rate limit `429` hoặc lỗi server `5xx`, dùng exponential backoff. Lỗi API key/model/request không hợp lệ sẽ debug ngay.
 
 ## Chạy bằng Docker Compose
 
