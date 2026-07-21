@@ -58,6 +58,7 @@ const config = {
   AI_REPLY_MAX_CHARS: parseNumberEnv('AI_REPLY_MAX_CHARS', 1_500, 100, 2_000),
   AI_IMAGE_MAX_BYTES: parseNumberEnv('AI_IMAGE_MAX_BYTES', 3_000_000, 100_000, 15_000_000),
   AI_IMAGE_MAX_COUNT: parseNumberEnv('AI_IMAGE_MAX_COUNT', 3, 1, 10),
+  AI_HISTORY_IMAGE_MAX_COUNT: parseNumberEnv('AI_HISTORY_IMAGE_MAX_COUNT', 8, 1, 20),
   AI_API_RETRIES: parseNumberEnv('AI_API_RETRIES', 4, 0, 8),
   AI_API_RETRY_BASE_MS: parseNumberEnv('AI_API_RETRY_BASE_MS', 1_000, 100, 10_000),
   AI_NAME_ALIASES: (process.env.AI_NAME_ALIASES || 'Peach,Peach Bot,PeachBot')

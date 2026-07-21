@@ -35,7 +35,8 @@ src/
 ├── commands.js           # slash commands và prefix commands
 ├── ui.js                 # embed, music panel, button/select interactions
 ├── ai/
-│   └── gemini.js         # context, ảnh đính kèm, retry, typing, reaction
+│   ├── gemini.js         # LangChain pipeline phân loại và sinh response
+│   └── prompts.js        # ChatPromptTemplate và output schemas
 └── music/
     └── service.js        # voice connection, queue, FFmpeg, playback state
 ```
@@ -64,7 +65,7 @@ Sau khi bot chạy, gõ `/panel` trong một text channel. Nếu command chưa x
 
 ### Gemini AI
 
-Google AI Studio cung cấp Gemini API key; SDK chính thức dùng package `@google/genai`. Khi `AI_ENABLED=true`, bot gửi lịch sử tối đa `AI_HISTORY_LIMIT` tin nhắn của channel sang Gemini để phân loại và tạo câu trả lời. Mặc định bot tự lấy ID voice channel mà nó đang join; khi bot chuyển room, channel AI cũng tự chuyển theo. Có thể đặt `AI_CHANNEL_ID` nếu muốn khóa cố định một channel.
+Google AI Studio cung cấp Gemini API key; bot dùng LangChain với `@langchain/google-genai`. Khi `AI_ENABLED=true`, bot chạy hai giai đoạn: giai đoạn 1 phân loại mức độ liên quan không hiển thị typing, giai đoạn 2 mới sinh câu trả lời và hiển thị typing. Mặc định bot tự lấy ID voice channel mà nó đang join; khi bot chuyển room, channel AI cũng tự chuyển theo. Có thể đặt `AI_CHANNEL_ID` nếu muốn khóa cố định một channel.
 
 Các biến liên quan:
 
@@ -78,11 +79,11 @@ AI_ONLY_VOICE_CHANNEL=true
 AI_REQUIRE_BOT_IN_VOICE=false
 ```
 
-Nội dung tin nhắn, lịch sử và tối đa `AI_IMAGE_MAX_COUNT` ảnh đính kèm ở tin nhắn cuối được gửi tới Google Gemini khi tính năng bật. Lịch sử được gửi thành từng `contents` riêng với `role=user`; mỗi content có dạng `<nickname>...</nickname><content>...</content><is_latest>...</is_latest>` để model phân biệt người dùng và nhận biết tin nhắn cuối. Ảnh vượt `AI_IMAGE_MAX_BYTES` sẽ bị bỏ qua; không bật AI trong các channel không muốn đưa dữ liệu ra ngoài.
+Nội dung tin nhắn, lịch sử và tối đa `AI_HISTORY_IMAGE_MAX_COUNT` ảnh đính kèm trong history được gửi tới Google Gemini khi tính năng bật. Lịch sử được gửi thành từng `contents` riêng với `role=user`; mỗi content có dạng `<nickname>...</nickname><content>...</content><is_latest>...</is_latest>` để model phân biệt người dùng và nhận biết tin nhắn cuối. Ảnh vượt `AI_IMAGE_MAX_BYTES` sẽ bị bỏ qua; không bật AI trong các channel không muốn đưa dữ liệu ra ngoài.
 
-Gemini sẽ retry tối đa `AI_API_RETRIES` lần sau lần gọi đầu với lỗi mạng, timeout, rate limit `429` hoặc lỗi server `5xx`, dùng exponential backoff. Lỗi API key/model/request không hợp lệ sẽ debug ngay.
+LangChain/Gemini sẽ retry tối đa `AI_API_RETRIES` lần sau lần gọi đầu với lỗi mạng, timeout, rate limit `429` hoặc lỗi server `5xx`, dùng exponential backoff. Lỗi API key/model/request không hợp lệ sẽ debug ngay.
 
-Trong lúc đọc lịch sử, tải ảnh và chờ Gemini generate/retry, bot sẽ hiển thị trạng thái đang nhập trong channel.
+Ảnh trong history cũng được gửi cho giai đoạn phân loại, tối đa `AI_HISTORY_IMAGE_MAX_COUNT` ảnh; trong giai đoạn 1 bot không hiển thị trạng thái đang nhập. Khi giai đoạn 1 xác định tin nhắn có liên quan, bot mới hiển thị typing trong lúc giai đoạn 2 sinh câu trả lời.
 
 ## Chạy bằng Docker Compose
 
