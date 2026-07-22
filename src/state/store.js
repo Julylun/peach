@@ -13,8 +13,9 @@ function createStateStore({ config }) {
     waterReminderMode: 'off',
     waterReminderIntervalMinutes: config.WATER_REMINDER_INTERVAL_MINUTES || 60,
     waterReminderUserIds: [],
+    personalizationEnabled: config.MEMORY_ENABLED !== false,
   };
-  let data = { guilds: {}, memories: {}, reminders: { todos: [], alarms: [] } };
+  let data = { guilds: {}, memories: {}, playback: {}, reminders: { todos: [], alarms: [] } };
 
   function load() {
     try {
@@ -23,9 +24,13 @@ function createStateStore({ config }) {
         data = {
           guilds: parsed.guilds || {},
           memories: parsed.memories || {},
+          playback: parsed.playback || {},
           reminders: {
             todos: parsed.reminders?.todos || [],
-            alarms: parsed.reminders?.alarms || [],
+            // If the process died while an alarm was ringing, allow it to fire again after restart.
+            alarms: (parsed.reminders?.alarms || []).map((alarm) => (
+              alarm.status === 'ringing' ? { ...alarm, status: 'pending' } : alarm
+            )),
           },
         };
       }
@@ -60,18 +65,52 @@ function createStateStore({ config }) {
   }
 
   function getUserMemory(guildId, userId) {
-    return data.memories[guildId]?.[userId] || { notes: [] };
+    const current = data.memories[guildId]?.[userId] || {};
+    return {
+      notes: Array.isArray(current.notes) ? current.notes : [],
+      enabled: current.enabled ?? config.MEMORY_ENABLED !== false,
+      updatedAt: current.updatedAt,
+    };
+  }
+
+  function isPersonalizationEnabled(guildId) {
+    return config.MEMORY_ENABLED !== false && getGuildSettings(guildId).personalizationEnabled !== false;
+  }
+
+  function setPersonalizationEnabled(guildId, enabled) {
+    return updateGuildSettings(guildId, { personalizationEnabled: Boolean(enabled) }).personalizationEnabled;
+  }
+
+  function isUserPersonalizationEnabled(guildId, userId) {
+    return isPersonalizationEnabled(guildId) && getUserMemory(guildId, userId).enabled !== false;
+  }
+
+  function setUserPersonalizationEnabled(guildId, userId, enabled) {
+    data.memories[guildId] ||= {};
+    const current = getUserMemory(guildId, userId);
+    data.memories[guildId][userId] = {
+      ...current,
+      enabled: Boolean(enabled),
+      updatedAt: Date.now(),
+    };
+    save();
+    return data.memories[guildId][userId].enabled;
   }
 
   function remember(guildId, userId, note) {
-    if (!config.MEMORY_ENABLED) return getUserMemory(guildId, userId);
+    if (!isUserPersonalizationEnabled(guildId, userId)) return getUserMemory(guildId, userId);
     data.memories[guildId] ||= {};
     const current = getUserMemory(guildId, userId);
     const normalized = String(note).trim().slice(0, config.MEMORY_NOTE_MAX_CHARS);
     const notes = [normalized, ...current.notes.filter((item) => item !== normalized)]
       .filter(Boolean)
       .slice(0, config.MEMORY_MAX_NOTES);
-    data.memories[guildId][userId] = { notes, updatedAt: Date.now() };
+    data.memories[guildId][userId] = {
+      ...current,
+      notes,
+      enabled: current.enabled !== false,
+      updatedAt: Date.now(),
+    };
     save();
     return data.memories[guildId][userId];
   }
@@ -83,8 +122,25 @@ function createStateStore({ config }) {
 
   function formatMemory(guildId, userId) {
     const memory = getUserMemory(guildId, userId);
-    if (!config.MEMORY_ENABLED || memory.notes.length === 0) return 'Không có memory được lưu.';
+    if (!isUserPersonalizationEnabled(guildId, userId)) return 'Personalization đang tắt cho bạn hoặc server.';
+    if (memory.notes.length === 0) return 'Không có memory được lưu.';
     return memory.notes.map((note, index) => `${index + 1}. ${note}`).join('\n');
+  }
+
+  function getPlaybackState(guildId) {
+    const snapshot = data.playback[guildId];
+    return snapshot ? JSON.parse(JSON.stringify(snapshot)) : null;
+  }
+
+  function updatePlaybackState(guildId, snapshot) {
+    data.playback[guildId] = JSON.parse(JSON.stringify(snapshot));
+    save();
+    return getPlaybackState(guildId);
+  }
+
+  function clearPlaybackState(guildId) {
+    if (data.playback[guildId]) delete data.playback[guildId];
+    save();
   }
 
   function addReminder(kind, reminder) {
@@ -130,10 +186,17 @@ function createStateStore({ config }) {
   return {
     getGuildSettings,
     updateGuildSettings,
+    isPersonalizationEnabled,
+    setPersonalizationEnabled,
+    isUserPersonalizationEnabled,
+    setUserPersonalizationEnabled,
     getUserMemory,
     formatMemory,
     remember,
     forgetUser,
+    getPlaybackState,
+    updatePlaybackState,
+    clearPlaybackState,
     addReminder,
     listReminders,
     updateReminder,

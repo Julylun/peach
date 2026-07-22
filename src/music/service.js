@@ -12,6 +12,7 @@ const {
   VoiceConnectionStatus,
   entersState,
 } = require('@discordjs/voice');
+const { createMediaStreams } = require('./media-streams');
 
 function createMusicService({ client, config, stateStore }) {
   const guildStates = new Map();
@@ -32,6 +33,11 @@ function createMusicService({ client, config, stateStore }) {
     sleep: ['sleep', 'night', 'ambient', 'rain', 'calm', 'lofi'],
     romantic: ['love', 'romantic', 'acoustic', 'piano', 'heart'],
   };
+
+  const playbackCheckpointTimer = setInterval(() => {
+    for (const guildId of guildStates.keys()) savePlaybackCheckpoint(guildId);
+  }, 5_000);
+  playbackCheckpointTimer.unref?.();
 
   function redactVoiceDebug(message) {
     return String(message)
@@ -122,37 +128,48 @@ function createMusicService({ client, config, stateStore }) {
 
   function getState(guildId) {
     if (!guildStates.has(guildId)) {
+      const settings = stateStore?.getGuildSettings(guildId) || {};
+      const persisted = stateStore?.getPlaybackState?.(guildId) || null;
+      const restoredCurrent = persisted?.current || null;
       const player = createAudioPlayer({
         behaviors: {
           noSubscriber: NoSubscriberBehavior.Play,
         },
       });
       const state = {
+        guildId,
         player,
-        queue: [],
-        playlist: [],
-        repeatMode: config.LOOP_PLAYLIST_DEFAULT ? 'all' : config.REPEAT_MODE_DEFAULT,
-        randomEnabled: config.RANDOM_NEXT_DEFAULT,
-        smartQueue: stateStore?.getGuildSettings(guildId).smartQueue ?? config.SMART_QUEUE_DEFAULT,
-        mood: stateStore?.getGuildSettings(guildId).mood || config.MOOD_DEFAULT,
-        ducking: stateStore?.getGuildSettings(guildId).ducking ?? config.AUTO_DUCKING_DEFAULT,
-        current: null,
+        queue: Array.isArray(persisted?.queue) ? persisted.queue : [],
+        playlist: Array.isArray(persisted?.playlist) ? persisted.playlist : [],
+        repeatMode: persisted?.repeatMode || settings.repeatMode || (config.LOOP_PLAYLIST_DEFAULT ? 'all' : config.REPEAT_MODE_DEFAULT),
+        randomEnabled: persisted?.randomEnabled ?? settings.randomEnabled ?? config.RANDOM_NEXT_DEFAULT,
+        smartQueue: persisted?.smartQueue ?? settings.smartQueue ?? config.SMART_QUEUE_DEFAULT,
+        mood: persisted?.mood || settings.mood || config.MOOD_DEFAULT,
+        ducking: settings.ducking ?? config.AUTO_DUCKING_DEFAULT,
+        current: restoredCurrent,
+        resumeTrack: restoredCurrent,
+        resumeOffsetSeconds: Math.max(0, Number(persisted?.positionSeconds) || 0),
+        playbackOffsetSeconds: Math.max(0, Number(persisted?.positionSeconds) || 0),
+        playbackStartedAt: null,
         activeResource: null,
         invalidTracks: new Set(),
         forceSingleNext: false,
-        volume: config.AUDIO_VOLUME,
+        volume: Math.max(0, Math.min(2, Number(persisted?.volume ?? settings.volume ?? config.AUDIO_VOLUME))),
         connection: null,
         ffmpegProcess: null,
         ytdlpProcess: null,
+        streamSession: null,
+        suppressAutoNext: false,
         speakingUsers: new Set(),
         alarmSession: null,
-        textChannelId: null,
+        textChannelId: persisted?.textChannelId || null,
         waitingForReady: false,
         voiceReconnectAttempts: 0,
-        recentTracks: [],
+        recentTracks: Array.isArray(persisted?.recentTracks) ? persisted.recentTracks : [],
       };
 
       player.on(AudioPlayerStatus.Idle, () => {
+        if (state.streamSession || state.suppressAutoNext) return;
         void playNext(guildId);
       });
 
@@ -165,12 +182,72 @@ function createMusicService({ client, config, stateStore }) {
         if (oldState.status !== newState.status) {
           console.log(`[voice:${guildId}] player ${oldState.status} -> ${newState.status}`);
         }
+        if (oldState.status === AudioPlayerStatus.Playing && newState.status === AudioPlayerStatus.Paused) {
+          capturePlaybackPosition(state);
+          savePlaybackCheckpoint(guildId);
+        }
+        if (newState.status === AudioPlayerStatus.Playing && state.current && !state.playbackStartedAt) {
+          state.playbackStartedAt = Date.now();
+        }
       });
 
       guildStates.set(guildId, state);
     }
 
     return guildStates.get(guildId);
+  }
+
+  function serializeTrack(track) {
+    if (!track) return null;
+    return {
+      source: track.source || 'local',
+      filePath: track.filePath,
+      url: track.url,
+      displayName: track.displayName,
+      playlist: track.playlist,
+      requestedBy: track.requestedBy,
+      requestedByName: track.requestedByName,
+      youtubeTitle: track.youtubeTitle,
+      youtubeUploader: track.youtubeUploader,
+      isLive: track.isLive === true,
+    };
+  }
+
+  function getPlaybackPosition(state) {
+    let position = Math.max(0, Number(state.playbackOffsetSeconds) || 0);
+    if (state.playbackStartedAt && state.player.state.status === AudioPlayerStatus.Playing) {
+      position += Math.max(0, Date.now() - state.playbackStartedAt) / 1_000;
+    }
+    return Math.round(position * 10) / 10;
+  }
+
+  function capturePlaybackPosition(state) {
+    state.playbackOffsetSeconds = getPlaybackPosition(state);
+    state.playbackStartedAt = null;
+    return state.playbackOffsetSeconds;
+  }
+
+  function savePlaybackCheckpoint(guildId) {
+    const state = guildStates.get(guildId);
+    if (!state || !stateStore?.updatePlaybackState) return;
+    if (!state.current && state.queue.length === 0 && state.playlist.length === 0) {
+      stateStore.clearPlaybackState?.(guildId);
+      return;
+    }
+    stateStore.updatePlaybackState(guildId, {
+      current: serializeTrack(state.current),
+      positionSeconds: getPlaybackPosition(state),
+      queue: state.queue.map(serializeTrack).filter(Boolean),
+      playlist: state.playlist.map(serializeTrack).filter(Boolean),
+      repeatMode: state.repeatMode,
+      randomEnabled: state.randomEnabled,
+      smartQueue: state.smartQueue,
+      mood: state.mood,
+      volume: state.volume,
+      textChannelId: state.textChannelId,
+      recentTracks: state.recentTracks,
+      savedAt: Date.now(),
+    });
   }
 
   function attachConnectionDebug(connection, guildId) {
@@ -232,6 +309,7 @@ function createMusicService({ client, config, stateStore }) {
   function setVolume(guildId, volume) {
     const state = getState(guildId);
     state.volume = Math.max(0, Math.min(2, Number(volume)));
+    stateStore?.updateGuildSettings?.(guildId, { volume: state.volume });
     applyDuckingVolume(state);
     return state.volume;
   }
@@ -348,6 +426,15 @@ function createMusicService({ client, config, stateStore }) {
     }
   }
 
+  function isYouTubePlaylistOnlyUrl(value) {
+    try {
+      const url = new URL(String(value).trim());
+      return url.searchParams.has('list') && !url.searchParams.has('v') && !url.pathname.includes('/shorts/');
+    } catch {
+      return false;
+    }
+  }
+
   function createYouTubeTrack(url) {
     return {
       source: 'youtube',
@@ -398,6 +485,7 @@ function createMusicService({ client, config, stateStore }) {
           resolve({
             title: typeof parsed.title === 'string' ? parsed.title.trim() : '',
             uploader: typeof parsed.uploader === 'string' ? parsed.uploader.trim() : '',
+            isLive: parsed.is_live === true || parsed.live_status === 'is_live',
           });
         } catch {
           resolve(null);
@@ -422,7 +510,34 @@ function createMusicService({ client, config, stateStore }) {
       track.youtubeTitle = metadata.title;
       track.youtubeUploader = metadata.uploader;
     }
+    track.isLive = metadata?.isLive === true;
     return track;
+  }
+
+  function createYouTubeTrackFromPlaylistEntry(entry) {
+    const track = createYouTubeTrack(entry.url);
+    if (entry.title) {
+      track.displayName = entry.uploader
+        ? `${entry.title} • ${entry.uploader}`
+        : entry.title;
+      track.youtubeTitle = entry.title;
+      track.youtubeUploader = entry.uploader;
+    }
+    track.isLive = entry.isLive === true;
+    return track;
+  }
+
+  async function collectYouTubeTracks(url, includeList = false) {
+    if (!includeList && !isYouTubePlaylistOnlyUrl(url)) {
+      return [await createResolvedYouTubeTrack(url)];
+    }
+
+    const entries = await streamTools.extractYouTubePlaylistEntries(
+      url,
+      includeList ? config.YOUTUBE_PLAYLIST_MAX_TRACKS : 1,
+    );
+    const tracks = entries.map(createYouTubeTrackFromPlaylistEntry);
+    return includeList ? tracks : tracks.slice(0, 1);
   }
 
   function collectPlayableTracksFromDirectory(filterText = '', rootDir = config.MUSIC_DIR, playlistName = '') {
@@ -471,6 +586,13 @@ function createMusicService({ client, config, stateStore }) {
   }
 
   function takeNextTrack(state) {
+    if (state.resumeTrack) {
+      const resumed = state.resumeTrack;
+      state.resumeTrack = null;
+      state.queue = state.queue.filter((track) => trackKey(track) !== trackKey(resumed));
+      return resumed;
+    }
+
     if (state.repeatMode === 'one' && state.current && !state.invalidTracks.has(trackKey(state.current))) {
       return state.current;
     }
@@ -542,7 +664,8 @@ function createMusicService({ client, config, stateStore }) {
       `Bot voice: ${voiceChannel ? `${voiceChannel.name} (${voiceChannel.id})` : 'chưa vào voice'}`,
       `Voice state: ${state?.connection?.state?.status || 'không có connection'}`,
       `Player state: ${state?.player?.state?.status || 'không có player'}`,
-      `Current track: ${state?.current?.displayName || 'không có'}`,
+      `Current track: ${state?.streamSession ? `LIVE ${state.streamSession.displayName}` : state?.current?.displayName || 'không có'}`,
+      `Stream mode: ${state?.streamSession ? 'on' : 'off'}`,
       `Queue length: ${state?.queue?.length || 0}`,
       `Repeat: ${state?.repeatMode || 'off'}`,
       `Random next: ${state?.randomEnabled ? 'on' : 'off'}`,
@@ -596,6 +719,7 @@ function createMusicService({ client, config, stateStore }) {
     if (state.connection?.state?.status === VoiceConnectionStatus.Ready) return state.connection;
 
     if (state.connection) {
+      savePlaybackCheckpoint(guildId);
       try {
         state.connection.destroy();
       } catch {
@@ -614,6 +738,9 @@ function createMusicService({ client, config, stateStore }) {
     if (!state) return;
 
     state.alarmSession?.finish('shutdown');
+    savePlaybackCheckpoint(guildId);
+    state.streamSession = null;
+    state.suppressAutoNext = true;
 
     if (state.ffmpegProcess && !state.ffmpegProcess.killed) state.ffmpegProcess.kill('SIGKILL');
     if (state.ytdlpProcess && !state.ytdlpProcess.killed) state.ytdlpProcess.kill('SIGKILL');
@@ -702,10 +829,15 @@ function createMusicService({ client, config, stateStore }) {
     );
   }
 
-  async function collectInputTracks(query = '', playlistName = '') {
-    const input = String(query || '').trim();
-    if (isYouTubeUrl(input)) return [await createResolvedYouTubeTrack(input)];
-    return playlistName ? collectPlaylistTracks(playlistName, input) : collectPlayableTracks(input);
+  async function collectInputTracks(query = '', playlistName = '', includeList = false) {
+    const queryInput = String(query || '').trim();
+    const playlistInput = String(playlistName || '').trim();
+    // Older Discord clients can keep the URL in the first autocomplete field.
+    // Treat a YouTube URL there as media input instead of a local folder name.
+    const input = queryInput || (isYouTubeUrl(playlistInput) ? playlistInput : '');
+    const localPlaylist = isYouTubeUrl(playlistInput) ? '' : playlistInput;
+    if (isYouTubeUrl(input)) return collectYouTubeTracks(input, includeList);
+    return localPlaylist ? collectPlaylistTracks(localPlaylist, input) : collectPlayableTracks(input);
   }
 
   async function resolveTrackInput(input) {
@@ -746,134 +878,11 @@ function createMusicService({ client, config, stateStore }) {
     return state.smartQueue;
   }
 
-  function attachFfmpegLogging(ffmpegProcess, label, onFailure) {
-    let stderr = '';
-    let failureReported = false;
-    const reportFailure = (error) => {
-      if (failureReported) return;
-      failureReported = true;
-      onFailure?.(error);
-    };
-
-    ffmpegProcess.stderr.on('data', (chunk) => {
-      stderr = `${stderr}${chunk}`.slice(-2_000);
-    });
-    ffmpegProcess.on('error', (error) => {
-      console.error(`[ffmpeg] failed for ${label}`, error);
-      reportFailure(error);
-    });
-    ffmpegProcess.on('close', (code, signal) => {
-      if (code !== 0 && signal !== 'SIGKILL') {
-        console.error(`[ffmpeg] exited code=${code} signal=${signal || 'none'} label=${label}\n${stderr}`);
-        reportFailure(new Error(`FFmpeg exit ${code ?? signal}: ${label}`));
-      }
-    });
-    return ffmpegProcess;
-  }
-
-  function createFfmpegStream(filePath, onFailure) {
-    const { spawn } = require('child_process');
-    const args = [
-      '-nostdin', '-hide_banner', '-loglevel', 'error',
-      '-i', filePath, '-map', '0:a:0', '-vn', '-sn', '-dn',
-      '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1',
-    ];
-    return attachFfmpegLogging(spawn(config.FFMPEG_PATH, args, { stdio: ['ignore', 'pipe', 'pipe'] }), formatRelative(filePath), onFailure);
-  }
-
-  function createYouTubeFfmpegStream(url, onFailure) {
-    const { spawn } = require('child_process');
-    const ytdlp = spawn(config.YTDLP_PATH, [
-      '--no-playlist',
-      '--no-warnings',
-      '--quiet',
-      '--no-progress',
-      '-f', 'bestaudio/best',
-      '-o', '-',
-      '--', url,
-    ], { stdio: ['ignore', 'pipe', 'pipe'] });
-    const ffmpeg = spawn(config.FFMPEG_PATH, [
-      '-nostdin', '-hide_banner', '-loglevel', 'error',
-      '-i', 'pipe:0', '-map', '0:a:0', '-vn', '-sn', '-dn',
-      '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1',
-    ], { stdio: ['pipe', 'pipe', 'pipe'] });
-
-    let streamEnded = false;
-    let failureReported = false;
-    const reportFailure = (error) => {
-      if (failureReported || streamEnded) return;
-      failureReported = true;
-      onFailure?.(error);
-    };
-
-    let ytdlpStderr = '';
-    ytdlp.stderr.on('data', (chunk) => {
-      ytdlpStderr = `${ytdlpStderr}${chunk}`.slice(-2_000);
-    });
-    ytdlp.on('error', (error) => {
-      console.error(`[yt-dlp] failed for ${url}`, error);
-      reportFailure(error);
-      if (!ffmpeg.killed) ffmpeg.kill('SIGKILL');
-    });
-    ytdlp.on('close', (code, signal) => {
-      if (code !== 0 && signal !== 'SIGKILL' && !streamEnded) {
-        console.error(`[yt-dlp] exited code=${code ?? signal} url=${url}\n${ytdlpStderr}`);
-        reportFailure(new Error(`yt-dlp exit ${code ?? signal}`));
-      }
-    });
-
-    const ffmpegProcess = attachFfmpegLogging(
-      ffmpeg,
-      `youtube ${url}`,
-      reportFailure
-    );
-    const handlePipeError = (error) => {
-      // Stopping a track closes FFmpeg stdin while yt-dlp may still be writing.
-      // EPIPE is expected during that shutdown and must not crash Node.
-      if (['EPIPE', 'ERR_STREAM_DESTROYED'].includes(error?.code)) return;
-      reportFailure(error);
-    };
-    ffmpeg.stdin.on('error', handlePipeError);
-    ytdlp.stdout.on('error', handlePipeError);
-    ffmpegProcess.on('close', () => {
-      streamEnded = true;
-      ytdlp.stdout.unpipe(ffmpeg.stdin);
-      if (!ffmpeg.stdin.destroyed) ffmpeg.stdin.destroy();
-      if (!ytdlp.killed) ytdlp.kill('SIGKILL');
-    });
-    ytdlp.stdout.pipe(ffmpeg.stdin);
-
-    return { ffmpegProcess, ytdlpProcess: ytdlp };
-  }
-
-  function createCrossfadeFfmpegStream(tracks, onFailure) {
-    const { spawn } = require('child_process');
-    const args = ['-nostdin', '-hide_banner', '-loglevel', 'error'];
-    const filters = [];
-
-    for (let index = 0; index < tracks.length; index += 1) {
-      args.push('-i', tracks[index].filePath);
-      filters.push(`[${index}:a:0]aresample=48000,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo[a${index}]`);
-    }
-
-    let previous = 'a0';
-    for (let index = 1; index < tracks.length; index += 1) {
-      const output = index === tracks.length - 1 ? 'out' : `xf${index}`;
-      filters.push(`[${previous}][a${index}]acrossfade=d=${config.CROSSFADE_SECONDS}:c1=tri:c2=tri[${output}]`);
-      previous = output;
-    }
-
-    args.push('-filter_complex', filters.join(';'), '-map', '[out]', '-f', 's16le', '-ar', '48000', '-ac', '2', 'pipe:1');
-    return attachFfmpegLogging(
-      spawn(config.FFMPEG_PATH, args, { stdio: ['ignore', 'pipe', 'pipe'] }),
-      `crossfade ${tracks.map((track) => track.displayName).join(' -> ')}`,
-      onFailure
-    );
-  }
-
+  const streamTools = createMediaStreams({ config, formatRelative });
   async function playNext(guildId) {
     const state = guildStates.get(guildId);
     if (!state) return;
+    if (state.streamSession) return;
 
     if (state.ffmpegProcess && !state.ffmpegProcess.killed) {
       state.ffmpegProcess.kill('SIGKILL');
@@ -884,25 +893,38 @@ function createMusicService({ client, config, stateStore }) {
       state.ytdlpProcess = null;
     }
 
-    const hasYouTubeTrack = state.current?.source === 'youtube' || state.queue.some((track) => track.source === 'youtube');
-    const batchSize = state.forceSingleNext || hasYouTubeTrack
+    const resuming = Boolean(state.resumeTrack);
+    const resumeOffsetSeconds = resuming ? state.resumeOffsetSeconds : 0;
+    const queuedTracks = state.queue.filter((track) => !state.invalidTracks.has(trackKey(track)));
+    const allQueuedLocal = queuedTracks.length > 1 && queuedTracks.every((track) => track.source !== 'youtube');
+    const allQueuedYouTube = queuedTracks.length > 1 && queuedTracks.every((track) => track.source === 'youtube' && !track.isLive);
+    const queuedLive = queuedTracks.some((track) => track.isLive);
+    const canCrossfade = config.CROSSFADE_SECONDS > 0 && (allQueuedLocal || allQueuedYouTube) && !queuedLive;
+    const batchSize = resuming || state.forceSingleNext || !canCrossfade
       ? 1
-      : config.CROSSFADE_SECONDS > 0 ? config.CROSSFADE_BATCH_SIZE : 1;
+      : config.CROSSFADE_BATCH_SIZE;
     state.forceSingleNext = false;
     const batch = takeNextTracks(state, batchSize);
     const next = batch[0];
     if (!next) {
       state.current = null;
+      state.playbackOffsetSeconds = 0;
+      state.playbackStartedAt = null;
+      stateStore?.clearPlaybackState?.(guildId);
       return;
     }
 
     if (!state.connection || state.connection.state.status !== VoiceConnectionStatus.Ready) {
-      state.queue.unshift(...batch);
+      if (resuming) state.resumeTrack = next;
+      else state.queue.unshift(...batch);
       if (state.connection) state.waitingForReady = true;
       return;
     }
 
     state.current = next;
+    state.playbackOffsetSeconds = resumeOffsetSeconds;
+    state.playbackStartedAt = null;
+    state.resumeOffsetSeconds = 0;
     state.recentTracks = [
       trackKey(next),
       ...state.recentTracks.filter((key) => key !== trackKey(next)),
@@ -925,14 +947,26 @@ function createMusicService({ client, config, stateStore }) {
     };
 
     let ffmpegProcess;
-    if (next.source === 'youtube') {
-      const youtubeStream = createYouTubeFfmpegStream(next.url, handleFfmpegFailure);
+    if (next.source === 'youtube' && batch.length > 1) {
+      try {
+        ffmpegProcess = await streamTools.createCrossfadeYouTubeFfmpegStream(batch, handleFfmpegFailure);
+        state.ytdlpProcess = null;
+      } catch (error) {
+        console.error(`[yt-dlp] unable to prepare YouTube crossfade`, {
+          errorMessage: error?.message,
+          tracks: batch.map((track) => track.displayName),
+        });
+        handleFfmpegFailure(error);
+        return;
+      }
+    } else if (next.source === 'youtube') {
+      const youtubeStream = streamTools.createYouTubeFfmpegStream(next.url, handleFfmpegFailure, resumeOffsetSeconds);
       ffmpegProcess = youtubeStream.ffmpegProcess;
       state.ytdlpProcess = youtubeStream.ytdlpProcess;
     } else {
       ffmpegProcess = batch.length > 1
-        ? createCrossfadeFfmpegStream(batch, handleFfmpegFailure)
-        : createFfmpegStream(next.filePath, handleFfmpegFailure);
+        ? streamTools.createCrossfadeFfmpegStream(batch, handleFfmpegFailure)
+        : streamTools.createFfmpegStream(next.filePath, handleFfmpegFailure, resumeOffsetSeconds);
       state.ytdlpProcess = null;
     }
     state.ffmpegProcess = ffmpegProcess;
@@ -963,6 +997,117 @@ function createMusicService({ client, config, stateStore }) {
     events.emit('trackStart', { guildId, track: next, textChannelId: state.textChannelId });
   }
 
+  function stopLiveStream(guildId, { resumeMusic = true, reason = 'stopped' } = {}) {
+    const state = guildStates.get(guildId);
+    const session = state?.streamSession;
+    if (!state || !session) return false;
+
+    session.stopping = true;
+    state.streamSession = null;
+    state.suppressAutoNext = true;
+    if (state.ffmpegProcess && !state.ffmpegProcess.killed) state.ffmpegProcess.kill('SIGKILL');
+    if (state.ytdlpProcess && !state.ytdlpProcess.killed) state.ytdlpProcess.kill('SIGKILL');
+    state.ffmpegProcess = null;
+    state.ytdlpProcess = null;
+    state.activeResource = null;
+    state.player.stop(true);
+
+    events.emit('streamEnd', { guildId, url: session.url, reason });
+    if (resumeMusic && state.connection?.state?.status === VoiceConnectionStatus.Ready) {
+      state.suppressAutoNext = false;
+      void playNext(guildId);
+    }
+    return true;
+  }
+
+  async function startStreamFromChannel(guild, memberVoice, guildId, textChannelId, url) {
+    const normalizedUrl = String(url || '').trim();
+    if (!isYouTubeUrl(normalizedUrl)) throw new Error('Stream cần là link YouTube hợp lệ.');
+
+    const track = await createResolvedYouTubeTrack(normalizedUrl);
+    const state = getState(guildId);
+    await ensureVoiceConnectionFromChannel(guild, memberVoice, guildId);
+    if (state.streamSession) stopLiveStream(guildId, { resumeMusic: false, reason: 'replaced' });
+
+    capturePlaybackPosition(state);
+    state.suppressAutoNext = true;
+    state.streamSession = {
+      url: normalizedUrl,
+      displayName: track.displayName,
+      startedAt: Date.now(),
+      stopping: false,
+    };
+    state.textChannelId = textChannelId || state.textChannelId;
+    if (state.ffmpegProcess && !state.ffmpegProcess.killed) state.ffmpegProcess.kill('SIGKILL');
+    if (state.ytdlpProcess && !state.ytdlpProcess.killed) state.ytdlpProcess.kill('SIGKILL');
+    state.ffmpegProcess = null;
+    state.ytdlpProcess = null;
+    state.activeResource = null;
+    state.player.stop(true);
+
+    const session = state.streamSession;
+    const handleFailure = (error) => {
+      if (state.streamSession !== session || session.stopping) return;
+      console.error(`[stream:${guildId}] failed`, { errorMessage: error?.message });
+      stopLiveStream(guildId, { reason: 'error' });
+    };
+
+    try {
+      const stream = streamTools.createYouTubeFfmpegStream(normalizedUrl, handleFailure);
+      state.ffmpegProcess = stream.ffmpegProcess;
+      state.ytdlpProcess = stream.ytdlpProcess;
+      const resource = createAudioResource(stream.ffmpegProcess.stdout, {
+        inputType: StreamType.Raw,
+        inlineVolume: true,
+      });
+      resource.volume?.setVolume(
+        state.ducking && state.speakingUsers.size > 0
+          ? state.volume * config.DUCKING_VOLUME
+          : state.volume,
+      );
+      resource.encoder?.setBitrate(config.OPUS_BITRATE);
+      resource.encoder?.setFEC(true);
+      state.activeResource = resource;
+      state.suppressAutoNext = false;
+      state.player.play(resource);
+      stream.ffmpegProcess.once('close', () => {
+        if (state.streamSession === session && !session.stopping) {
+          stopLiveStream(guildId, { reason: 'ended' });
+        }
+      });
+
+      const textChannel = client.channels.cache.get(state.textChannelId);
+      if (textChannel?.isTextBased()) {
+        textChannel.send(`Đang stream live: \`${track.displayName}\``).catch(() => {});
+      }
+      events.emit('streamStart', { guildId, track, textChannelId: state.textChannelId });
+      return track;
+    } catch (error) {
+      stopLiveStream(guildId, { reason: 'error' });
+      throw error;
+    }
+  }
+
+  async function startStreamFromMessage(message, url) {
+    return startStreamFromChannel(
+      message.guild,
+      message.member?.voice?.channel,
+      message.guild.id,
+      message.channel.id,
+      url,
+    );
+  }
+
+  async function startStreamFromInteraction(interaction, url) {
+    return startStreamFromChannel(
+      interaction.guild,
+      interaction.member?.voice?.channel,
+      interaction.guild.id,
+      interaction.channelId,
+      url,
+    );
+  }
+
   function startAlarm(guildId, track, durationMs = 90_000, alarmId = 'unknown') {
     const state = guildStates.get(guildId);
     const connection = state?.connection;
@@ -971,6 +1116,7 @@ function createMusicService({ client, config, stateStore }) {
     }
 
     const previousStatus = state.player.state.status;
+    capturePlaybackPosition(state);
     if (previousStatus === AudioPlayerStatus.Playing) state.player.pause();
 
     const alarmPlayer = createAudioPlayer({
@@ -1010,11 +1156,11 @@ function createMusicService({ client, config, stateStore }) {
     try {
       let stream;
       if (track.source === 'youtube') {
-        stream = createYouTubeFfmpegStream(track.url, () => finish('error'));
+        stream = streamTools.createYouTubeFfmpegStream(track.url, () => finish('error'));
         session.ffmpegProcess = stream.ffmpegProcess;
         session.ytdlpProcess = stream.ytdlpProcess;
       } else {
-        session.ffmpegProcess = createFfmpegStream(track.filePath, () => finish('error'));
+        session.ffmpegProcess = streamTools.createFfmpegStream(track.filePath, () => finish('error'));
         stream = { ffmpegProcess: session.ffmpegProcess };
       }
       const resource = createAudioResource(stream.ffmpegProcess.stdout, {
@@ -1044,8 +1190,15 @@ function createMusicService({ client, config, stateStore }) {
     return true;
   }
 
-  function appendTracks(state, tracks) {
-    const ordered = orderTracksForMood(tracks, state.mood);
+  function appendTracks(state, tracks, requester = null) {
+    const taggedTracks = requester?.id
+      ? tracks.map((track) => ({
+        ...track,
+        requestedBy: requester.id,
+        requestedByName: requester.name || requester.username,
+      }))
+      : tracks;
+    const ordered = orderTracksForMood(taggedTracks, state.mood);
     const occupied = new Set([
       trackKey(state.current),
       ...state.queue.map((track) => trackKey(track)),
@@ -1061,32 +1214,102 @@ function createMusicService({ client, config, stateStore }) {
     return additions;
   }
 
-  async function enqueueTrack(message, query = '', playlistName = '') {
+  async function enqueueTrack(message, query = '', playlistName = '', includeList = false) {
     const state = getState(message.guild.id);
-    const tracks = await collectInputTracks(query, playlistName);
+    const tracks = await collectInputTracks(query, playlistName, includeList);
     if (tracks.length === 0) throw new Error(`Không tìm thấy file nhạc trong thư mục ${config.MUSIC_DIR}.`);
     await ensureVoiceConnection(message);
+    const wasStreaming = Boolean(state.streamSession);
+    if (wasStreaming) stopLiveStream(message.guild.id, { resumeMusic: false, reason: 'play-requested' });
     state.textChannelId = message.channel.id;
-    const additions = appendTracks(state, tracks);
-    if (additions.length === 0) return [];
+    const additions = appendTracks(state, tracks, {
+      id: message.author.id,
+      name: message.author.globalName || message.author.username,
+    });
+    if (additions.length === 0) {
+      if (wasStreaming) {
+        state.suppressAutoNext = false;
+        await playNext(message.guild.id);
+      }
+      return [];
+    }
+    if (wasStreaming) {
+      state.suppressAutoNext = false;
+      await playNext(message.guild.id);
+    }
     if (state.player.state.status !== AudioPlayerStatus.Playing && !state.current) await playNext(message.guild.id);
     return additions;
   }
 
-  async function enqueueTrackFromInteraction(interaction, query = '', playlistName = '') {
+  async function enqueueTrackFromInteraction(interaction, query = '', playlistName = '', includeList = false) {
     const state = getState(interaction.guild.id);
-    const tracks = await collectInputTracks(query, playlistName);
+    const tracks = await collectInputTracks(query, playlistName, includeList);
     if (tracks.length === 0) throw new Error(`Không tìm thấy file nhạc trong thư mục ${config.MUSIC_DIR}.`);
     await ensureVoiceConnectionFromInteraction(interaction);
+    const wasStreaming = Boolean(state.streamSession);
+    if (wasStreaming) stopLiveStream(interaction.guild.id, { resumeMusic: false, reason: 'play-requested' });
     state.textChannelId = interaction.channelId;
-    const additions = appendTracks(state, tracks);
-    if (additions.length === 0) return [];
+    const additions = appendTracks(state, tracks, {
+      id: interaction.user.id,
+      name: interaction.user.globalName || interaction.user.username,
+    });
+    if (additions.length === 0) {
+      if (wasStreaming) {
+        state.suppressAutoNext = false;
+        await playNext(interaction.guild.id);
+      }
+      return [];
+    }
+    if (wasStreaming) {
+      state.suppressAutoNext = false;
+      await playNext(interaction.guild.id);
+    }
     if (state.player.state.status !== AudioPlayerStatus.Playing && !state.current) await playNext(interaction.guild.id);
     return additions;
   }
 
+  async function resumePlaybackFromChannel(guild, memberVoice, guildId, textChannelId = null) {
+    const state = getState(guildId);
+    await ensureVoiceConnectionFromChannel(guild, memberVoice, guildId);
+    if (textChannelId) state.textChannelId = textChannelId;
+
+    if (state.player.state.status === AudioPlayerStatus.Playing) return true;
+    if (state.player.state.status === AudioPlayerStatus.Paused) {
+      state.player.unpause();
+      return true;
+    }
+    if (!state.resumeTrack && state.current) state.resumeTrack = state.current;
+    if (!state.resumeTrack) return false;
+    if (state.connection?.state?.status === VoiceConnectionStatus.Ready) {
+      await playNext(guildId);
+    } else {
+      state.waitingForReady = true;
+      await playNext(guildId);
+    }
+    return true;
+  }
+
+  async function resumePlaybackFromMessage(message) {
+    return resumePlaybackFromChannel(
+      message.guild,
+      message.member?.voice?.channel,
+      message.guild.id,
+      message.channel.id
+    );
+  }
+
+  async function resumePlaybackFromInteraction(interaction) {
+    return resumePlaybackFromChannel(
+      interaction.guild,
+      interaction.member?.voice?.channel,
+      interaction.guild.id,
+      interaction.channelId
+    );
+  }
+
   function cleanupAll() {
     for (const guildId of guildStates.keys()) cleanupGuild(guildId);
+    clearInterval(playbackCheckpointTimer);
   }
 
   return {
@@ -1104,9 +1327,14 @@ function createMusicService({ client, config, stateStore }) {
     ensureVoiceConnectionFromChannel,
     enqueueTrack,
     enqueueTrackFromInteraction,
+    resumePlaybackFromMessage,
+    resumePlaybackFromInteraction,
     resolveTrackInput,
     startAlarm,
     stopAlarm,
+    startStreamFromMessage,
+    startStreamFromInteraction,
+    stopLiveStream,
     collectPlayableTracks: collectPlayableTracksByQuery,
     collectPlaylistTracks,
     listPlaylists,
@@ -1115,6 +1343,8 @@ function createMusicService({ client, config, stateStore }) {
     playNext,
     stopState(state) {
       state.alarmSession?.finish('stopped');
+      if (state.streamSession) stopLiveStream(state.guildId, { resumeMusic: false, reason: 'stopped' });
+      state.suppressAutoNext = false;
       state.queue.length = 0;
       state.playlist.length = 0;
       state.repeatMode = 'off';
@@ -1130,6 +1360,11 @@ function createMusicService({ client, config, stateStore }) {
         state.ytdlpProcess.kill('SIGKILL');
         state.ytdlpProcess = null;
       }
+      state.resumeTrack = null;
+      state.resumeOffsetSeconds = 0;
+      state.playbackOffsetSeconds = 0;
+      state.playbackStartedAt = null;
+      if (state.guildId) stateStore?.clearPlaybackState?.(state.guildId);
       state.player.stop(true);
     },
     setMood,

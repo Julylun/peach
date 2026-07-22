@@ -6,6 +6,8 @@ const {
   stageOneSchema,
   stageTwoPrompt,
   stageTwoSchema,
+  personalizationPrompt,
+  personalizationSchema,
 } = require('./prompts');
 
 const MODEL_DISCLOSURE_REPLY = 'PeachModel được tạo bởi Cức 🍑✨';
@@ -48,6 +50,12 @@ function createAiService({ client, config, music, state }) {
         temperature: 0.85,
         maxOutputTokens: 260,
       });
+      const personalizationModel = new ChatGoogleGenerativeAI({
+        apiKey: config.GEMINI_API_KEY,
+        model: config.GEMINI_MODEL,
+        temperature: 0.1,
+        maxOutputTokens: 300,
+      });
 
       models = {
         analysis: analysisModel.withStructuredOutput(stageOneSchema, {
@@ -55,6 +63,9 @@ function createAiService({ client, config, music, state }) {
         }),
         response: responseModel.withStructuredOutput(stageTwoSchema, {
           name: 'peach_response',
+        }),
+        personalization: personalizationModel.withStructuredOutput(personalizationSchema, {
+          name: 'peach_personalization_extraction',
         }),
       };
     }
@@ -116,6 +127,7 @@ function createAiService({ client, config, music, state }) {
       : [];
 
     return {
+      userId: message.author.id,
       nickname: nickname.slice(0, 120),
       content: content.slice(0, 800),
       attachments: attachments.map((item) => item.name || item.url),
@@ -140,6 +152,7 @@ function createAiService({ client, config, music, state }) {
       : '';
 
     return [
+      `<user_id>${escapeTagValue(historyMessage.userId)}</user_id>`,
       `<nickname>${escapeTagValue(historyMessage.nickname)}</nickname>`,
       `<content>${escapeTagValue(historyMessage.content)}</content>`,
       `<is_latest>${historyMessage.isLatest ? 'true' : 'false'}</is_latest>`,
@@ -227,6 +240,34 @@ function createAiService({ client, config, music, state }) {
     return [new HumanMessage({ content })];
   }
 
+  function getPersonalizationContext(message, history) {
+    if (!state?.isPersonalizationEnabled?.(message.guild.id)) {
+      return 'Personalization đang tắt toàn server.';
+    }
+
+    const participantIds = [...new Set(history
+      .map((item) => item.userId)
+      .filter((userId) => userId && userId !== client.user?.id))];
+    const blocks = [];
+    for (const userId of participantIds) {
+      if (!state.isUserPersonalizationEnabled(message.guild.id, userId)) continue;
+      const memory = state.getUserMemory(message.guild.id, userId);
+      if (!memory.notes?.length) continue;
+      const displayName = history.find((item) => item.userId === userId)?.nickname || userId;
+      blocks.push(
+        `<personalization><user_id>${escapeTagValue(userId)}</user_id>` +
+        `<nickname>${escapeTagValue(displayName)}</nickname>` +
+        `<facts>${memory.notes
+          .map((note) => `<fact>${escapeTagValue(note)}</fact>`)
+          .join('')}</facts></personalization>`
+      );
+    }
+
+    return blocks.length > 0
+      ? blocks.join('\n')
+      : 'Không có personalization phù hợp cho những người đang tham gia cuộc trò chuyện.';
+  }
+
   function getErrorStatus(error) {
     return Number(
       error?.status ||
@@ -303,6 +344,7 @@ function createAiService({ client, config, music, state }) {
       action: actions.has(result?.action) ? result.action : 'none',
       query: typeof result?.query === 'string' ? result.query.trim().slice(0, 160) : '',
       playlist: typeof result?.playlist === 'string' ? result.playlist.trim().slice(0, 120) : '',
+      list: result?.list === true,
       mood: moods.has(result?.mood) ? result.mood : 'auto',
       reason: typeof result?.reason === 'string' ? result.reason.slice(0, 300) : '',
     };
@@ -342,11 +384,16 @@ function createAiService({ client, config, music, state }) {
       const state = music.getState(message.guild.id);
       switch (analysisResult.action) {
         case 'play': {
-          const tracks = await music.enqueueTrack(message, analysisResult.query, analysisResult.playlist);
+          const tracks = await music.enqueueTrack(
+            message,
+            analysisResult.query,
+            analysisResult.playlist,
+            analysisResult.list,
+          );
           const source = analysisResult.playlist
             ? ` playlist ${analysisResult.playlist}`
             : analysisResult.query ? ` theo từ khóa ${analysisResult.query}` : ' toàn bộ music/';
-          return `Đã thêm ${tracks.length} bài từ${source}.`;
+          return `Đã thêm ${tracks.length} bài từ${source}${analysisResult.list ? ' (toàn bộ YouTube list)' : ''}.`;
         }
         case 'pause':
           if (state.player.state.status !== music.activePlayerStatus.Playing) return 'Không có bài đang phát để tạm dừng.';
@@ -407,10 +454,52 @@ function createAiService({ client, config, music, state }) {
         confidence: analysisResult.confidence,
       }),
       action_result: escapeTagValue(actionResult || 'Không có thao tác DJ.'),
-      memory: escapeTagValue(state?.formatMemory(message.guild.id, message.author.id) || 'Không có memory được lưu.'),
+      memory: getPersonalizationContext(message, history),
       history: toLangChainHistory(history),
     });
     return normalizeResponse(await invokeWithRetries(response, messages, 'stage-2'));
+  }
+
+  function normalizePersonalization(result) {
+    const facts = Array.isArray(result?.facts) ? result.facts : [];
+    return {
+      facts: facts.map((item) => ({
+        userId: String(item?.userId || '').trim(),
+        fact: String(item?.fact || '').trim().slice(0, config.MEMORY_NOTE_MAX_CHARS),
+      })).filter((item) => item.userId && item.fact).slice(0, 3),
+    };
+  }
+
+  async function collectPersonalization(message, history) {
+    try {
+      if (!state?.isPersonalizationEnabled?.(message.guild.id)) return;
+
+      const participantIds = new Set(history
+        .map((item) => item.userId)
+        .filter((userId) => userId && userId !== client.user?.id));
+      if (participantIds.size === 0) return;
+
+      const { personalization } = getModels();
+      const messages = await personalizationPrompt.formatMessages({
+        history: toLangChainHistory(history),
+      });
+      const result = normalizePersonalization(await invokeWithRetries(
+        personalization,
+        messages,
+        'personalization',
+      ));
+
+      for (const item of result.facts) {
+        if (!participantIds.has(item.userId)) continue;
+        if (!state.isUserPersonalizationEnabled(message.guild.id, item.userId)) continue;
+        state.remember(message.guild.id, item.userId, item.fact);
+      }
+    } catch (error) {
+      console.warn(`[ai:${message.channelId}] personalization extraction failed`, {
+        errorCode: error?.code,
+        errorMessage: error?.message,
+      });
+    }
   }
 
   async function handleMessage(message) {
@@ -433,6 +522,8 @@ function createAiService({ client, config, music, state }) {
       // Stage 1 intentionally runs without typing: it only decides whether Peach was addressed.
       const history = await fetchHistory(message);
       const analysisResult = await analyze(history);
+      // Extract only high-value facts in the background; participant filtering happens before saving.
+      void collectPersonalization(message, history);
       if (!analysisResult.mentioned) return;
 
       const actionResult = await executeMusicAction(message, analysisResult);

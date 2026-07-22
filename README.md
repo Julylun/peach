@@ -21,7 +21,7 @@ PeachBot là Discord bot hỗ trợ phòng học, phòng thư giãn và phòng n
 - Todo gửi DM khi đến giờ.
 - Alarm tạm dừng bài hiện tại, phát nhạc báo thức, cho phép tắt hoặc delay 10 phút rồi resume.
 - AI Peach đọc lịch sử tin nhắn, ảnh đính kèm và chỉ phản hồi khi nội dung liên quan đến bot.
-- Memory cá nhân do người dùng chủ động lưu.
+- Personalization theo từng user và server, có thể bật/tắt và lọc theo người đang hội thoại.
 
 ## Yêu cầu
 
@@ -92,11 +92,14 @@ Gõ `/help` trong Discord để xem help trực tiếp. Nếu bật prefix comma
 | --- | --- |
 | `/join` | Peach vào voice channel bạn đang đứng và tự mở panel. |
 | `/panel` | Mở lại panel điều khiển nhạc. |
-| `/status` | Xem voice state, player state, bài hiện tại, queue và quyền bot. |
+| `/status` | Mở dashboard tổng quan với các section Queue, Todo & Alarm, Social, Voice và Refresh. |
+| `/me` | Mở dashboard cá nhân: todo, alarm, memory và vị trí bài bạn đã thêm vào queue. |
 | `/leave` | Dừng kết nối và rời voice channel. |
 | `/help` | Xem hướng dẫn lệnh. |
 
 Panel có các nhóm điều khiển phát nhạc, queue, playlist và settings. Chọn playlist trong panel rồi bấm `Play` để phát mà không cần gõ `/play`.
+
+`/me` là dashboard riêng của người dùng. Các bài được thêm từ thời điểm tracking được bật sẽ có `requesterId`, vì vậy Peach có thể hiển thị chính xác vị trí của chúng trong queue.
 
 ### Phát nhạc
 
@@ -105,8 +108,10 @@ Panel có các nhóm điều khiển phát nhạc, queue, playlist và settings.
 | `/play` | Phát toàn bộ thư mục `music/`. |
 | `/play playlist:<name>` | Phát playlist được chọn. |
 | `/play query:<text>` | Lọc file local theo tên hoặc stream URL YouTube. |
+| `/play query:<playlist-url> list:true` | Lấy toàn bộ bài trong YouTube playlist/list. Mặc định `list:false`, chỉ lấy video đầu tiên. |
+| `/stream url:<youtube-live-url> video:disabled` | Dừng nhạc hiện tại và phát audio live stream YouTube; dùng `/play` để dừng stream. `video:enabled` hiện bị chặn vì bot token không hỗ trợ camera outbound. |
 | `/pause` | Tạm dừng bài hiện tại. |
-| `/resume` | Phát tiếp bài đang tạm dừng. |
+| `/resume` | Phát tiếp bài đang tạm dừng hoặc khôi phục checkpoint sau khi bot restart. |
 | `/skip` | Chuyển bài. |
 | `/stop` | Dừng nhạc và xóa queue đang chờ. |
 | `/volume percent:<0-200>` | Chỉnh âm lượng. |
@@ -122,13 +127,17 @@ Ví dụ:
 /play playlist:lofi
 /play query:rain
 /play query:https://www.youtube.com/watch?v=...
+/play query:https://www.youtube.com/playlist?list=... list:true
 ```
+
+Với YouTube playlist/list, Peach dùng `yt-dlp` để đọc danh sách entry rồi thêm tối đa `YOUTUBE_PLAYLIST_MAX_TRACKS` bài vào queue. Đặt `list:false` hoặc bỏ qua tham số để chỉ phát bài đầu tiên.
 
 ### Chế độ phát
 
 | Lệnh | Chức năng |
 | --- | --- |
 | `/loop enabled:true` | Lặp toàn bộ playlist vô hạn. |
+| `/loopone enabled:true` | Lặp riêng bài đang phát. |
 | `/repeat mode:off` | Tắt repeat. |
 | `/repeat mode:one` | Lặp bài hiện tại. |
 | `/repeat mode:all` | Lặp playlist. |
@@ -137,6 +146,8 @@ Ví dụ:
 | `/ducking enabled:true` | Tự giảm nhạc khi có người nói. |
 | `/mood value:focus` | Ưu tiên bài phù hợp mood. |
 | `/smartqueue enabled:true` | Hạn chế thêm trùng và lặp bài gần đây. |
+
+Crossfade áp dụng cho queue local và queue gồm nhiều link YouTube hữu hạn. Live stream là nguồn liên tục nên không ghép crossfade.
 
 Các mood hiện có: `auto`, `calm`, `focus`, `happy`, `sad`, `energetic`, `sleep`, `romantic`.
 
@@ -160,6 +171,10 @@ Todo và alarm dùng giờ 24h theo `PEACH_TIMEZONE`, mặc định là `Asia/Ho
 
 Alarm là reminder một lần. Nếu dùng `Delay 10 phút`, alarm được tạo lại ở thời điểm mới.
 
+### Resume sau khi restart
+
+Peach tự lưu checkpoint playback khoảng mỗi 5 giây vào `data/peach-state.json`, gồm bài hiện tại, vị trí phát, queue, playlist và các chế độ phát. Nếu process bị kill hoặc server mất điện, hãy vào voice channel rồi dùng `/resume`; Peach sẽ seek lại file local tới vị trí gần nhất và phát tiếp. Nút `Resume` trong panel dùng cùng cơ chế.
+
 ### Social mode
 
 | Lệnh | Chức năng |
@@ -180,12 +195,20 @@ Water reminder mặc định tắt.
 ### Memory
 
 ```text
-/remember note:"Tôi thường học vào buổi tối"
+/remember me
+/remember me enabled:true
+/remember me enabled:false
+/remember on
+/remember off
 /memory
 /forgetme
 ```
 
-Memory chỉ được lưu khi user chủ động dùng `/remember` và có thể xóa bằng `/forgetme`.
+- `/remember me` đảo trạng thái personalization riêng của bạn. Có thể dùng `enabled:true` hoặc `enabled:false` để đặt rõ trạng thái.
+- `/remember on` và `/remember off` bật/tắt personalization cho toàn bộ server; chỉ chủ server hoặc người có quyền Manage Server dùng được. Tắt không xóa dữ liệu cũ; `/forgetme` mới xóa memory của chính bạn.
+- Mặc định personalization bật nếu `PEACH_MEMORY_ENABLED` không phải `false`.
+- Khi bật, AI âm thầm trích xuất rất ít fact quan trọng, rõ ràng và ổn định từ lịch sử. AI không lưu suy đoán, thông tin nhạy cảm hoặc dữ liệu nhất thời.
+- Khi tạo context, Peach chỉ đưa memory của những user xuất hiện trong history hiện tại vào prompt; memory của user ngoài cuộc không được dùng.
 
 ## AI Peach
 
@@ -193,6 +216,8 @@ AI sử dụng Google Gemini thông qua LangChain. Bot xử lý hai giai đoạn
 
 1. Phân tích message, lịch sử và ảnh để xác định có đang gọi hoặc hỏi Peach hay không.
 2. Nếu có liên quan, Peach hiển thị typing rồi sinh câu trả lời.
+
+Khi personalization đang bật, một tác vụ nền riêng chỉ trích xuất fact quan trọng và ổn định từ history. Tác vụ này không hiển thị typing, không lưu dữ liệu nhạy cảm và chỉ ghi vào memory của các user thật sự xuất hiện trong history.
 
 AI đọc text channel của voice room mà bot đang tham gia khi `AI_USE_CURRENT_VOICE_CHANNEL=true`. Có thể khóa channel bằng `AI_CHANNEL_ID`. Bot không tự nghe hoặc chuyển giọng nói trong voice channel thành text.
 
@@ -223,6 +248,7 @@ MUSIC_DIR=./music
 PEACH_STATE_FILE=./data/peach-state.json
 FFMPEG_PATH=ffmpeg
 YTDLP_PATH=yt-dlp
+YOUTUBE_PLAYLIST_MAX_TRACKS=50
 AUDIO_VOLUME=1.15
 OPUS_BITRATE=128000
 LOOP_PLAYLIST=false
@@ -290,7 +316,7 @@ src/
 
 ## Ghi chú
 
-- State runtime nằm ở `data/peach-state.json`; thư mục `data/` không được commit.
+- State runtime nằm ở `data/peach-state.json`; thư mục `data/` không được commit. Settings water, persona, mood, atmosphere, radio, smart queue, ducking, memory, todo và alarm được giữ lại sau khi restart.
 - `VOICE_DEBUG=true` hữu ích khi chẩn đoán voice handshake nhưng tạo nhiều log.
 - `AUDIO_VOLUME` nằm trong khoảng `0` đến `2`; `OPUS_BITRATE` tối đa mặc định là `128000`.
 - FFmpeg chuyển audio về PCM 48 kHz stereo trước khi gửi vào Discord.

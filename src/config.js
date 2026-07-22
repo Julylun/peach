@@ -39,6 +39,7 @@ const config = {
   STATE_FILE: path.resolve(process.env.PEACH_STATE_FILE || path.join(process.cwd(), 'data', 'peach-state.json')),
   FFMPEG_PATH: resolveFfmpegPath(),
   YTDLP_PATH: process.env.YTDLP_PATH?.trim() || 'yt-dlp',
+  YOUTUBE_PLAYLIST_MAX_TRACKS: parseNumberEnv('YOUTUBE_PLAYLIST_MAX_TRACKS', 50, 1, 200),
   AUTO_DUCKING_DEFAULT: process.env.AUTO_DUCKING_ENABLED !== 'false',
   DUCKING_VOLUME: parseNumberEnv('DUCKING_VOLUME', 0.35, 0.05, 1),
   ENABLE_PREFIX_COMMANDS: process.env.ENABLE_PREFIX_COMMANDS === 'true',

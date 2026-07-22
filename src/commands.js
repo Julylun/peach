@@ -1,240 +1,12 @@
 const {
   MessageFlags,
-  SlashCommandBuilder,
+  PermissionsBitField,
 } = require('discord.js');
+const { buildSlashCommands } = require('./commands/definitions');
 
 function createCommandService({ client, config, music, ui, state, social, reminders }) {
   const AudioPlayerStatus = music.activePlayerStatus;
   const VoiceConnectionStatus = music.voiceStatus;
-
-  function buildSlashCommands() {
-    return [
-      new SlashCommandBuilder().setName('join').setDescription('Vào voice channel của bạn'),
-      new SlashCommandBuilder()
-        .setName('play')
-        .setDescription('Phát nhạc local hoặc URL YouTube')
-        .addStringOption((option) => option
-          .setName('playlist')
-          .setDescription('Chọn playlist từ thư mục music')
-          .setAutocomplete(true)
-          .setRequired(false))
-        .addStringOption((option) => option
-          .setName('query')
-          .setDescription('Bộ lọc file local hoặc URL YouTube')
-          .setRequired(false)),
-      new SlashCommandBuilder().setName('playlists').setDescription('Xem các playlist trong thư mục music'),
-      new SlashCommandBuilder()
-        .setName('ducking')
-        .setDescription('Bật/tắt tự giảm âm lượng khi có người nói')
-        .addBooleanOption((option) => option
-          .setName('enabled')
-          .setDescription('Bật hoặc tắt auto ducking')
-          .setRequired(false)),
-      new SlashCommandBuilder()
-        .setName('water')
-        .setDescription('Cấu hình lời nhắc uống nước trong voice room')
-        .addSubcommand((subcommand) => subcommand
-          .setName('mode')
-          .setDescription('Chọn người nhận lời nhắc')
-          .addStringOption((option) => option
-            .setName('value')
-            .setDescription('Tắt, nhắc tất cả hoặc nhắc người đã chọn')
-            .setRequired(true)
-            .addChoices(
-              { name: 'Tắt nhắc', value: 'off' },
-              { name: 'Tất cả người trong room', value: 'all' },
-              { name: 'Người đã chọn', value: 'selected' },
-            ))
-          .addUserOption((option) => option
-            .setName('user')
-            .setDescription('Thêm người này vào nhóm được nhắc')
-            .setRequired(false)))
-        .addSubcommand((subcommand) => subcommand
-          .setName('add')
-          .setDescription('Thêm một người vào nhóm được nhắc')
-          .addUserOption((option) => option.setName('user').setDescription('Người cần nhắc').setRequired(true)))
-        .addSubcommand((subcommand) => subcommand
-          .setName('remove')
-          .setDescription('Bỏ một người khỏi nhóm được nhắc')
-          .addUserOption((option) => option.setName('user').setDescription('Người không cần nhắc').setRequired(true)))
-        .addSubcommand((subcommand) => subcommand
-          .setName('interval')
-          .setDescription('Đặt khoảng thời gian giữa các lần nhắc')
-          .addIntegerOption((option) => option
-            .setName('minutes')
-            .setDescription('Từ 5 đến 240 phút')
-            .setMinValue(5)
-            .setMaxValue(240)
-            .setRequired(true)))
-        .addSubcommand((subcommand) => subcommand
-          .setName('status')
-          .setDescription('Xem cấu hình nhắc uống nước')),
-      new SlashCommandBuilder()
-        .setName('todo')
-        .setDescription('Đặt một việc cần làm và nhận DM khi đến giờ')
-        .addStringOption((option) => option
-          .setName('title')
-          .setDescription('Tên công việc')
-          .setRequired(true))
-        .addIntegerOption((option) => option
-          .setName('hour')
-          .setDescription('Giờ theo định dạng 24h, từ 0 đến 23')
-          .setMinValue(0)
-          .setMaxValue(23)
-          .setRequired(true))
-        .addIntegerOption((option) => option
-          .setName('minute')
-          .setDescription('Phút từ 0 đến 59')
-          .setMinValue(0)
-          .setMaxValue(59)
-          .setRequired(true))
-        .addStringOption((option) => option
-          .setName('description')
-          .setDescription('Mô tả công việc, có thể bỏ trống')
-          .setRequired(false)),
-      new SlashCommandBuilder()
-        .setName('alarm')
-        .setDescription('Đặt báo thức phát nhạc trong voice channel')
-        .addStringOption((option) => option
-          .setName('title')
-          .setDescription('Mô tả báo thức')
-          .setRequired(true))
-        .addIntegerOption((option) => option
-          .setName('hour')
-          .setDescription('Giờ theo định dạng 24h, từ 0 đến 23')
-          .setMinValue(0)
-          .setMaxValue(23)
-          .setRequired(true))
-        .addIntegerOption((option) => option
-          .setName('minute')
-          .setDescription('Phút từ 0 đến 59')
-          .setMinValue(0)
-          .setMaxValue(59)
-          .setRequired(true))
-        .addStringOption((option) => option
-          .setName('music')
-          .setDescription('Tên file local, bộ lọc file hoặc URL YouTube')
-          .setRequired(true)),
-      new SlashCommandBuilder().setName('reminders').setDescription('Xem số todo và báo thức đang chờ'),
-      new SlashCommandBuilder().setName('pause').setDescription('Tạm dừng bài đang phát'),
-      new SlashCommandBuilder().setName('resume').setDescription('Tiếp tục phát bài'),
-      new SlashCommandBuilder()
-        .setName('volume')
-        .setDescription('Chỉnh âm lượng bot theo phần trăm')
-        .addIntegerOption((option) => option
-          .setName('percent')
-          .setDescription('0 đến 200%')
-          .setMinValue(0)
-          .setMaxValue(200)
-          .setRequired(true)),
-      new SlashCommandBuilder().setName('nowplaying').setDescription('Xem bài đang phát'),
-      new SlashCommandBuilder()
-        .setName('queue')
-        .setDescription('Xem queue hiện tại')
-        .addIntegerOption((option) => option
-          .setName('page')
-          .setDescription('Trang queue, mỗi trang 10 bài')
-          .setMinValue(1)
-          .setRequired(false)),
-      new SlashCommandBuilder()
-        .setName('remove')
-        .setDescription('Xóa một bài khỏi queue')
-        .addIntegerOption((option) => option
-          .setName('position')
-          .setDescription('Vị trí bài trong queue')
-          .setMinValue(1)
-          .setRequired(true)),
-      new SlashCommandBuilder().setName('clear').setDescription('Xóa toàn bộ queue đang chờ'),
-      new SlashCommandBuilder()
-        .setName('list')
-        .setDescription('Liệt kê file nhạc local')
-        .addStringOption((option) => option
-          .setName('filter')
-          .setDescription('Lọc theo tên file hoặc thư mục')
-          .setRequired(false)),
-      new SlashCommandBuilder().setName('skip').setDescription('Bỏ qua bài hiện tại'),
-      new SlashCommandBuilder().setName('stop').setDescription('Dừng phát và xoá queue'),
-      new SlashCommandBuilder().setName('leave').setDescription('Rời voice channel'),
-      new SlashCommandBuilder().setName('status').setDescription('Xem trạng thái bot và voice connection'),
-      new SlashCommandBuilder().setName('help').setDescription('Xem hướng dẫn sử dụng PeachBot'),
-      new SlashCommandBuilder().setName('panel').setDescription('Mở bảng điều khiển nhạc trực tiếp'),
-      new SlashCommandBuilder()
-        .setName('loop')
-        .setDescription('Bật/tắt phát lặp playlist vô hạn')
-        .addBooleanOption((option) => option
-          .setName('enabled')
-          .setDescription('Bật hoặc tắt loop; bỏ trống để đảo trạng thái')
-          .setRequired(false)),
-      new SlashCommandBuilder()
-        .setName('repeat')
-        .setDescription('Chọn chế độ lặp: tắt, bài hiện tại hoặc playlist')
-        .addStringOption((option) => option
-          .setName('mode')
-          .setDescription('Chế độ lặp')
-          .setRequired(true)
-          .addChoices(
-            { name: 'Tắt', value: 'off' },
-            { name: 'Bài hiện tại', value: 'one' },
-            { name: 'Cả playlist', value: 'all' },
-          )),
-      new SlashCommandBuilder()
-        .setName('random')
-        .setDescription('Bật/tắt chọn bài kế tiếp ngẫu nhiên')
-        .addBooleanOption((option) => option
-          .setName('enabled')
-          .setDescription('Bật hoặc tắt random; bỏ trống để đảo trạng thái')
-          .setRequired(false)),
-      new SlashCommandBuilder().setName('shuffle').setDescription('Xáo trộn các bài đang chờ'),
-      new SlashCommandBuilder()
-        .setName('mood')
-        .setDescription('Đổi mood để Peach sắp xếp playlist thông minh')
-        .addStringOption((option) => option
-          .setName('value')
-          .setDescription('Mood của playlist')
-          .setRequired(true)
-          .addChoices(
-            { name: 'Tự động', value: 'auto' },
-            { name: 'Chill', value: 'calm' },
-            { name: 'Tập trung', value: 'focus' },
-            { name: 'Vui', value: 'happy' },
-            { name: 'Buồn', value: 'sad' },
-            { name: 'Năng lượng', value: 'energetic' },
-            { name: 'Ngủ', value: 'sleep' },
-            { name: 'Lãng mạn', value: 'romantic' },
-          )),
-      new SlashCommandBuilder()
-        .setName('persona')
-        .setDescription('Chọn tính cách phản hồi của Peach')
-        .addStringOption((option) => option
-          .setName('value')
-          .setDescription('Persona')
-          .setRequired(true)
-          .addChoices(
-            { name: 'Cute', value: 'cute' },
-            { name: 'Lofi', value: 'lofi' },
-            { name: 'Chaotic', value: 'chaotic' },
-            { name: 'Formal', value: 'formal' },
-          )),
-      new SlashCommandBuilder()
-        .setName('atmosphere')
-        .setDescription('Bật/tắt lời nhắc không khí trong voice room')
-        .addBooleanOption((option) => option.setName('enabled').setDescription('Bật hoặc tắt').setRequired(false)),
-      new SlashCommandBuilder()
-        .setName('radio')
-        .setDescription('Bật/tắt Radio Host của Peach')
-        .addBooleanOption((option) => option.setName('enabled').setDescription('Bật hoặc tắt').setRequired(false)),
-      new SlashCommandBuilder()
-        .setName('smartqueue')
-        .setDescription('Bật/tắt queue thông minh, tránh lặp bài gần đây')
-        .addBooleanOption((option) => option.setName('enabled').setDescription('Bật hoặc tắt').setRequired(false)),
-      new SlashCommandBuilder()
-        .setName('remember')
-        .setDescription('Lưu một ghi chú riêng cho Peach nhớ')
-        .addStringOption((option) => option.setName('note').setDescription('Ghi chú cần lưu').setRequired(true)),
-      new SlashCommandBuilder().setName('forgetme').setDescription('Xóa toàn bộ memory của bạn'),
-      new SlashCommandBuilder().setName('memory').setDescription('Xem memory Peach đang lưu của bạn'),
-    ].map((command) => command.toJSON());
-  }
 
   async function registerSlashCommands() {
     const commands = buildSlashCommands();
@@ -257,6 +29,16 @@ function createCommandService({ client, config, music, ui, state, social, remind
     throw new Error('Giá trị cần là `on` hoặc `off`.');
   }
 
+  function assertManageGuild(subject) {
+    const userId = subject?.user?.id || subject?.author?.id;
+    const guild = subject?.guild;
+    const permissions = subject?.memberPermissions || subject?.member?.permissions;
+    const isOwner = guild?.ownerId && guild.ownerId === userId;
+    if (!isOwner && !permissions?.has?.(PermissionsBitField.Flags.ManageGuild)) {
+      throw new Error('Chỉ chủ server hoặc người có quyền Manage Server mới được bật/tắt personalization toàn server.');
+    }
+  }
+
   async function handleJoin(message) {
     await music.ensureVoiceConnection(message);
     const panel = await message.reply(ui.buildMusicPanel(message.guild));
@@ -265,17 +47,36 @@ function createCommandService({ client, config, music, ui, state, social, remind
 
   async function handlePlay(message, args) {
     let playlist = '';
+    let includeList = false;
     const playlistArgument = args.find((arg) => /^(?:playlist|pl)[:=]/i.test(arg));
     if (playlistArgument) {
       playlist = playlistArgument.replace(/^(?:playlist|pl)[:=]/i, '');
       args = args.filter((arg) => arg !== playlistArgument);
     }
+    const listArgument = args.find((arg) => /^list[:=]/i.test(arg));
+    if (listArgument) {
+      includeList = parseToggle(listArgument.replace(/^list[:=]/i, ''), false);
+      args = args.filter((arg) => arg !== listArgument);
+    }
     const query = args.join(' ');
-    const tracks = await music.enqueueTrack(message, query, playlist);
+    const tracks = await music.enqueueTrack(message, query, playlist, includeList);
     await message.reply(
       `Đã thêm ${tracks.length} bài vào hàng đợi` +
-      `${playlist ? ` từ playlist **${playlist}**` : ''}${query ? ` theo lọc \`${query}\`` : ''}.`
+      `${playlist ? ` từ playlist **${playlist}**` : ''}${query ? ` theo lọc \`${query}\`` : ''}` +
+      `${includeList ? ' (toàn bộ YouTube list)' : ''}.`
     );
+  }
+
+  async function handleStream(message, args) {
+    const videoArgument = args.find((arg) => /^video:/i.test(arg));
+    const video = videoArgument?.split(':')[1]?.toLowerCase() || 'disabled';
+    if (video === 'enabled') {
+      throw new Error('Discord bot token hiện không thể gửi video camera trong voice channel. Dùng `video:disabled` để stream audio.');
+    }
+    const url = args.find((arg) => !/^video:/i.test(arg));
+    if (!url) throw new Error('Dùng `!stream <link-youtube-live>`.');
+    const track = await music.startStreamFromMessage(message, url);
+    await message.reply(`Đang stream **${track.displayName}** 📡🎵\nDùng \`${config.PREFIX}play ...\` để tắt stream và quay lại nhạc.`);
   }
 
   function handlePlaylists(message) {
@@ -393,13 +194,11 @@ function createCommandService({ client, config, music, ui, state, social, remind
     message.reply('Đã tạm dừng nhạc.').catch(() => {});
   }
 
-  function handleResume(message) {
-    const state = music.getState(message.guild.id);
-    if (!state.player.unpause()) {
-      message.reply('Không có bài nào đang tạm dừng.').catch(() => {});
-      return;
-    }
-    message.reply('Nhạc phát tiếp rồi.').catch(() => {});
+  async function handleResume(message) {
+    const resumed = await music.resumePlaybackFromMessage(message);
+    message.reply(resumed
+      ? 'Nhạc phát tiếp từ đoạn Peach đã nhớ rồi nha 🍑▶️'
+      : 'Không có bài nào đang tạm dừng hoặc checkpoint để resume.').catch(() => {});
   }
 
   function handleVolume(message, args) {
@@ -448,6 +247,17 @@ function createCommandService({ client, config, music, ui, state, social, remind
     }
     const suffix = state.playlist.length > 0 ? '' : ' Hãy dùng `!play` trước để tạo playlist.';
     message.reply(`Loop playlist: **${enabled ? 'bật' : 'tắt'}**.${suffix}`).catch(() => {});
+  }
+
+  function handleLoopOne(message, args) {
+    const state = music.getState(message.guild.id);
+    const enabled = parseToggle(args[0], state.repeatMode === 'one');
+    state.repeatMode = enabled ? 'one' : 'off';
+    if (enabled && !state.current && state.connection?.state?.status === VoiceConnectionStatus.Ready) {
+      void music.playNext(message.guild.id);
+    }
+    const suffix = state.current ? '' : ' Hãy phát một bài trước.';
+    message.reply(`Loop bài hiện tại: **${enabled ? 'bật' : 'tắt'}**.${suffix}`).catch(() => {});
   }
 
   function handleRepeat(message, args) {
@@ -499,10 +309,36 @@ function createCommandService({ client, config, music, ui, state, social, remind
     message.reply(`${setting}: **${result ? 'bật' : 'tắt'}** ${setting === 'atmosphere' ? '🌿' : setting === 'radio' ? '📻' : '🧠'}`).catch(() => {});
   }
 
-  function handleRemember(message, note) {
-    if (!note) throw new Error('Hãy nhập nội dung cần nhớ.');
-    const memory = state.remember(message.guild.id, message.author.id, note);
-    message.reply(`Peach nhớ thêm rồi nha 🍑\n${memory.notes.map((item, index) => `${index + 1}. ${item}`).join('\n')}`).catch(() => {});
+  function formatPersonalizationStatus(guildId, userId) {
+    const globalEnabled = state.isPersonalizationEnabled(guildId);
+    const userEnabled = state.getUserMemory(guildId, userId).enabled !== false;
+    const effective = state.isUserPersonalizationEnabled(guildId, userId);
+    return `Personalization server: **${globalEnabled ? 'bật' : 'tắt'}**\n` +
+      `Cài đặt cá nhân: **${userEnabled ? 'bật' : 'tắt'}**\n` +
+      `Hiệu lực hiện tại: **${effective ? 'bật' : 'tắt'}**`;
+  }
+
+  function handleRemember(message, args = []) {
+    const action = String(args[0] || '').toLowerCase();
+    if (action === 'me') {
+      const current = state.isUserPersonalizationEnabled(message.guild.id, message.author.id);
+      const enabled = state.setUserPersonalizationEnabled(
+        message.guild.id,
+        message.author.id,
+        args[1] ? parseToggle(args[1], current) : !current,
+      );
+      message.reply(`${formatPersonalizationStatus(message.guild.id, message.author.id)}\nĐã ${enabled ? 'bật' : 'tắt'} personalization riêng của bạn 🍑`).catch(() => {});
+      return;
+    }
+
+    if (action === 'on' || action === 'off') {
+      assertManageGuild(message);
+      const enabled = state.setPersonalizationEnabled(message.guild.id, action === 'on');
+      message.reply(`${formatPersonalizationStatus(message.guild.id, message.author.id)}\nĐã ${enabled ? 'bật' : 'tắt'} personalization toàn server 🧠`).catch(() => {});
+      return;
+    }
+
+    throw new Error('Dùng `!remember me`, `!remember on` hoặc `!remember off`.');
   }
 
   function handleForgetMe(message) {
@@ -562,6 +398,16 @@ function createCommandService({ client, config, music, ui, state, social, remind
     message.reply('Đã rời voice channel.').catch(() => {});
   }
 
+  async function handleStatus(message) {
+    const panel = await message.reply(ui.buildStatusPanel(message.guild));
+    ui.watchStatusMessage(panel);
+  }
+
+  async function handleMe(message) {
+    const panel = await message.reply(ui.buildPersonalPanel(message.guild, message.author));
+    ui.watchPersonalMessage(panel, message.author);
+  }
+
   function getHelpText() {
     return [
       '🍑 **PeachBot Help**',
@@ -571,12 +417,14 @@ function createCommandService({ client, config, music, ui, state, social, remind
       '`/join` - Peach vào voice channel bạn đang đứng và mở panel.',
       '`/play` - phát toàn bộ nhạc trong `music/`.',
       '`/play playlist:<tên>` - phát playlist là một folder con trong `music/`.',
-      '`/play query:<từ khóa hoặc URL YouTube>` - lọc file hoặc stream YouTube.',
+      '`/play query:<từ khóa hoặc URL YouTube>` - lọc file hoặc phát YouTube.',
+      '`/play query:<URL playlist> list:true` - thêm toàn bộ bài trong YouTube list; mặc định chỉ lấy bài đầu tiên.',
+      '`/stream url:<link YouTube live> video:disabled` - tắt nhạc hiện tại và phát audio live; video camera chưa khả dụng với bot token.',
       '`/playlists` - xem playlist hiện có.',
       '`/panel` - mở panel nút/menu điều khiển nhạc.',
       '',
       '**⏯️ Điều khiển**',
-      '`/pause`, `/resume` - tạm dừng hoặc phát tiếp.',
+      '`/pause`, `/resume` - tạm dừng hoặc phát tiếp; `/resume` còn khôi phục checkpoint sau khi bot restart.',
       '`/skip` - chuyển bài; `/stop` - dừng nhạc và xóa queue.',
       '`/leave` - rời voice channel.',
       '`/volume percent:<0-200>` - chỉnh âm lượng.',
@@ -586,6 +434,7 @@ function createCommandService({ client, config, music, ui, state, social, remind
       '',
       '**🔁 Chế độ phát**',
       '`/loop enabled:<true|false>` - lặp toàn bộ playlist.',
+      '`/loopone enabled:<true|false>` - lặp riêng bài đang phát.',
       '`/repeat mode:<off|one|all>` - tắt, lặp bài hiện tại hoặc lặp playlist.',
       '`/random enabled:<true|false>` - chọn bài tiếp theo ngẫu nhiên.',
       '`/shuffle` - xáo trộn queue.',
@@ -607,11 +456,14 @@ function createCommandService({ client, config, music, ui, state, social, remind
       '',
       '**🤖 AI và memory**',
       'Khi AI được bật, hãy gọi Peach trong text chat của voice channel để bot đọc ngữ cảnh và trả lời.',
-      '`/remember`, `/memory`, `/forgetme` - lưu, xem hoặc xóa memory cá nhân.',
-      '`/status` - xem voice connection, player, queue và quyền bot.',
+      '`/remember me` - bật/tắt personalization riêng của bạn; `/remember on|off` - bật/tắt toàn server.',
+      '`/memory`, `/forgetme` - xem hoặc xóa memory cá nhân.',
+      '`/status` - mở dashboard tổng quan; dùng button để xem Queue, Todo & Alarm, Social hoặc Voice.',
+      '`/me` - xem todo, alarm, memory và vị trí các bài bạn đã thêm vào queue.',
       '',
       '**Ví dụ prefix**',
       `\`${config.PREFIX}play playlist:lofi\``,
+      `\`${config.PREFIX}play list:true https://www.youtube.com/playlist?list=...\``,
       `\`${config.PREFIX}todo 20:30 | Học bài | Ôn chương 1\``,
       `\`${config.PREFIX}alarm 07:00 | Dậy học | alarm.mp3\``,
       `\`${config.PREFIX}water all\``,
@@ -663,6 +515,9 @@ function createCommandService({ client, config, music, ui, state, social, remind
         case 'play':
           await handlePlay(message, args);
           break;
+        case 'stream':
+          await handleStream(message, args);
+          break;
         case 'playlists':
         case 'playlist':
           handlePlaylists(message);
@@ -688,7 +543,7 @@ function createCommandService({ client, config, music, ui, state, social, remind
           break;
         case 'resume':
         case 'unpause':
-          handleResume(message);
+          await handleResume(message);
           break;
         case 'volume':
           handleVolume(message, args);
@@ -716,6 +571,9 @@ function createCommandService({ client, config, music, ui, state, social, remind
         case 'loop':
           handleLoop(message, args);
           break;
+        case 'loopone':
+          handleLoopOne(message, args);
+          break;
         case 'repeat':
           handleRepeat(message, args);
           break;
@@ -737,7 +595,7 @@ function createCommandService({ client, config, music, ui, state, social, remind
           handleSocialToggle(message, command, args[0]);
           break;
         case 'remember':
-          handleRemember(message, args.join(' '));
+          handleRemember(message, args);
           break;
         case 'memory':
           handleMemory(message);
@@ -750,7 +608,10 @@ function createCommandService({ client, config, music, ui, state, social, remind
           handleLeave(message);
           break;
         case 'status':
-          await message.reply(`\`\`\`text\n${music.getVoiceStatusSummary(message.guild)}\n\`\`\``);
+          await handleStatus(message);
+          break;
+        case 'me':
+          await handleMe(message);
           break;
         case 'help':
           await handleHelp(message);
@@ -780,13 +641,28 @@ function createCommandService({ client, config, music, ui, state, social, remind
         });
       } else if (content) {
         const reply = await interaction.editReply(content);
-        if (interaction.commandName === 'join' || interaction.commandName === 'panel') {
+        if (interaction.commandName === 'status') {
+          ui.watchStatusMessage(reply);
+        } else if (interaction.commandName === 'me') {
+          ui.watchPersonalMessage(reply, interaction.user);
+        } else if (interaction.commandName === 'join' || interaction.commandName === 'panel') {
           ui.watchPanelMessage(reply);
         }
       } else {
         await interaction.editReply('Xong.');
       }
     } catch (error) {
+      const interactionExpired = [10062, 40060].includes(error?.code)
+        || error?.status === 404
+        || error?.code === 'UND_ERR_CONNECT_TIMEOUT'
+        || error?.name === 'ConnectTimeoutError';
+      if (interactionExpired) {
+        console.warn(
+          `[interaction:${interaction.id}] ${interaction.commandName} response unavailable ` +
+            `code=${error?.code || error?.name} age=${Date.now() - interaction.createdTimestamp}ms`
+        );
+        return;
+      }
       console.error(`[interaction:${interaction.id}] ${interaction.commandName} failed`, {
         ageMs: Date.now() - interaction.createdTimestamp,
         deferMs: Date.now() - startedAt,
@@ -813,6 +689,7 @@ function createCommandService({ client, config, music, ui, state, social, remind
   async function handleAutocomplete(interaction) {
     if (interaction.commandName !== 'play') return;
     const focusedOption = interaction.options.getFocused(true);
+    if (interaction.responded || interaction.replied || interaction.deferred) return;
     if (focusedOption.name !== 'playlist') {
       await interaction.respond([]);
       return;
@@ -828,6 +705,14 @@ function createCommandService({ client, config, music, ui, state, social, remind
     await interaction.respond(choices);
   }
 
+  function logAutocompleteFailure(interaction, error) {
+    const expected = [10062, 40060].includes(error?.code)
+      || error?.code === 'UND_ERR_CONNECT_TIMEOUT'
+      || error?.name === 'ConnectTimeoutError';
+    const level = expected ? 'warn' : 'error';
+    console[level](`[autocomplete:${interaction.id}] ${error?.code || error?.name || 'failed'}: ${error?.message || 'unknown error'}`);
+  }
+
   async function handleInteraction(interaction) {
     if (interaction.isButton?.() && interaction.customId.startsWith('peach:alarm:')) {
       await reminders.handleInteraction(interaction);
@@ -836,9 +721,19 @@ function createCommandService({ client, config, music, ui, state, social, remind
 
     if (interaction.isAutocomplete()) {
       await handleAutocomplete(interaction).catch((error) => {
-        console.error(`[autocomplete:${interaction.id}] failed`, error);
-        interaction.respond([]).catch(() => {});
+        // Autocomplete interactions expire quickly; never retry a failed response.
+        logAutocompleteFailure(interaction, error);
       });
+      return;
+    }
+
+    if (interaction.isButton?.() && interaction.customId.startsWith('peach:status:')) {
+      await ui.handleStatusInteraction(interaction);
+      return;
+    }
+
+    if (interaction.isButton?.() && interaction.customId.startsWith('peach:me:')) {
+      await ui.handlePersonalInteraction(interaction);
       return;
     }
 
@@ -866,11 +761,23 @@ function createCommandService({ client, config, music, ui, state, social, remind
         await respondToInteraction(interaction, async () => {
           const query = interaction.options.getString('query') || '';
           const playlist = interaction.options.getString('playlist') || '';
-          const tracks = await music.enqueueTrackFromInteraction(interaction, query, playlist);
+          const includeList = interaction.options.getBoolean('list') === true;
+          const tracks = await music.enqueueTrackFromInteraction(interaction, query, playlist, includeList);
           const source = playlist
             ? `playlist \`${playlist}\``
             : query.trim() ? `lọc \`${query.trim()}\`` : 'toàn bộ thư mục \`music/\`';
-          return `Đã thêm ${tracks.length} bài vào hàng đợi từ ${source}.`;
+          return `Đã thêm ${tracks.length} bài vào hàng đợi từ ${source}${includeList ? ' (toàn bộ YouTube list)' : ''}.`;
+        });
+        break;
+      case 'stream':
+        await respondToInteraction(interaction, async () => {
+          const url = interaction.options.getString('url');
+          const video = interaction.options.getString('video') || 'disabled';
+          if (video === 'enabled') {
+            throw new Error('Discord bot token hiện không thể gửi video camera trong voice channel. Hãy dùng `video:disabled` để stream audio.');
+          }
+          const track = await music.startStreamFromInteraction(interaction, url);
+          return `Đang stream **${track.displayName}** 📡🎵\nDùng \`/play ...\` để tắt stream và quay lại nhạc.`;
         });
         break;
       case 'playlists':
@@ -949,8 +856,10 @@ function createCommandService({ client, config, music, ui, state, social, remind
         break;
       case 'resume':
         await respondToInteraction(interaction, async () => {
-          const state = music.getState(interaction.guild.id);
-          return state.player.unpause() ? 'Nhạc phát tiếp rồi.' : 'Không có bài nào đang tạm dừng.';
+          const resumed = await music.resumePlaybackFromInteraction(interaction);
+          return resumed
+            ? 'Nhạc phát tiếp từ đoạn Peach đã nhớ rồi nha 🍑▶️'
+            : 'Không có bài nào đang tạm dừng hoặc checkpoint để resume.';
         });
         break;
       case 'volume':
@@ -1024,7 +933,10 @@ function createCommandService({ client, config, music, ui, state, social, remind
         });
         break;
       case 'status':
-        await respondToInteraction(interaction, async () => `\`\`\`text\n${music.getVoiceStatusSummary(interaction.guild)}\n\`\`\``);
+        await respondToInteraction(interaction, async () => ui.buildStatusPanel(interaction.guild));
+        break;
+      case 'me':
+        await respondToInteraction(interaction, async () => ui.buildPersonalPanel(interaction.guild, interaction.user));
         break;
       case 'help':
         await respondToInteraction(interaction, async () => getHelpText());
@@ -1041,6 +953,17 @@ function createCommandService({ client, config, music, ui, state, social, remind
             void music.playNext(interaction.guild.id);
           }
           return `Loop playlist: **${enabled ? 'bật' : 'tắt'}**.` + (state.playlist.length > 0 ? '' : ' Hãy dùng `/play` trước để tạo playlist.');
+        });
+        break;
+      case 'loopone':
+        await respondToInteraction(interaction, async () => {
+          const state = music.getState(interaction.guild.id);
+          const enabled = interaction.options.getBoolean('enabled') ?? state.repeatMode !== 'one';
+          state.repeatMode = enabled ? 'one' : 'off';
+          if (enabled && !state.current && state.connection?.state?.status === VoiceConnectionStatus.Ready) {
+            void music.playNext(interaction.guild.id);
+          }
+          return `Loop bài hiện tại: **${enabled ? 'bật' : 'tắt'}**.` + (state.current ? '' : ' Hãy phát một bài trước.');
         });
         break;
       case 'repeat':
@@ -1100,12 +1023,22 @@ function createCommandService({ client, config, music, ui, state, social, remind
         break;
       case 'remember':
         await respondToInteraction(interaction, async () => {
-          const memory = state.remember(
-            interaction.guild.id,
-            interaction.user.id,
-            interaction.options.getString('note')
-          );
-          return `Peach nhớ thêm rồi nha 🍑\n${memory.notes.map((item, index) => `${index + 1}. ${item}`).join('\n')}`;
+          const subcommand = interaction.options.getSubcommand();
+          const guildId = interaction.guild.id;
+          const userId = interaction.user.id;
+          if (subcommand === 'me') {
+            const current = state.isUserPersonalizationEnabled(guildId, userId);
+            const enabled = state.setUserPersonalizationEnabled(
+              guildId,
+              userId,
+              interaction.options.getBoolean('enabled') ?? !current,
+            );
+            return `${formatPersonalizationStatus(guildId, userId)}\nĐã ${enabled ? 'bật' : 'tắt'} personalization riêng của bạn 🍑`;
+          }
+
+          assertManageGuild(interaction);
+          const enabled = state.setPersonalizationEnabled(guildId, subcommand === 'on');
+          return `${formatPersonalizationStatus(guildId, userId)}\nĐã ${enabled ? 'bật' : 'tắt'} personalization toàn server 🧠`;
         });
         break;
       case 'memory':
