@@ -35,6 +35,7 @@ function createUiService({ music, config, state: stateStore, social }) {
       stop: 'Đã dừng nhạc',
       leave: 'Tạm biệt voice',
       status: 'Trạng thái PeachBot',
+      help: 'Hướng dẫn PeachBot',
       loop: 'Loop playlist',
       repeat: 'Repeat mode',
       random: 'Random next',

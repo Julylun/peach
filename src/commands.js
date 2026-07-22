@@ -156,6 +156,7 @@ function createCommandService({ client, config, music, ui, state, social, remind
       new SlashCommandBuilder().setName('stop').setDescription('Dừng phát và xoá queue'),
       new SlashCommandBuilder().setName('leave').setDescription('Rời voice channel'),
       new SlashCommandBuilder().setName('status').setDescription('Xem trạng thái bot và voice connection'),
+      new SlashCommandBuilder().setName('help').setDescription('Xem hướng dẫn sử dụng PeachBot'),
       new SlashCommandBuilder().setName('panel').setDescription('Mở bảng điều khiển nhạc trực tiếp'),
       new SlashCommandBuilder()
         .setName('loop')
@@ -563,36 +564,87 @@ function createCommandService({ client, config, music, ui, state, social, remind
 
   function getHelpText() {
     return [
-      'Lệnh hiện có:',
-      `\`${config.PREFIX}join\` - vào voice channel của bạn`,
-      `\`${config.PREFIX}play [lọc|URL YouTube]\` - phát toàn bộ nhạc local, lọc file hoặc stream YouTube`,
-      `\`${config.PREFIX}play playlist:lofi\` - phát một playlist trong music/`,
-      `\`${config.PREFIX}playlists\` - xem playlist hiện có`,
-      `\`${config.PREFIX}ducking [on|off]\` - tự giảm nhạc khi có người nói`,
-      `\`${config.PREFIX}water off|all|selected\` - cấu hình nhắc uống nước`,
-      `\`${config.PREFIX}water add|remove @user\` / \`${config.PREFIX}water interval 60\` - quản lý người và thời gian nhắc`,
-      `\`${config.PREFIX}todo HH:MM | Title | Description\` - đặt todo và nhận DM`,
-      `\`${config.PREFIX}alarm HH:MM | Title | music\` - đặt báo thức trong voice`,
-      `\`${config.PREFIX}reminders\` - xem số todo/báo thức đang chờ`,
-      `\`${config.PREFIX}pause\` / \`${config.PREFIX}resume\` - tạm dừng/tiếp tục`,
-      `\`${config.PREFIX}volume <0-200>\` - chỉnh âm lượng`,
-      `\`${config.PREFIX}nowplaying\` - xem bài đang phát`,
-      `\`${config.PREFIX}queue [trang|từ khóa]\` - xem queue hoặc liệt kê file nhạc`,
-      `\`${config.PREFIX}remove <vị trí>\` / \`${config.PREFIX}clear\` - quản lý queue`,
-      `\`${config.PREFIX}skip\` - bỏ qua bài hiện tại`,
-      `\`${config.PREFIX}stop\` - dừng phát`,
-      `\`${config.PREFIX}loop [on|off]\` - lặp playlist vô hạn`,
-      `\`${config.PREFIX}repeat off|one|all\` - chế độ lặp`,
-      `\`${config.PREFIX}random [on|off]\` - chọn bài kế tiếp ngẫu nhiên`,
-      `\`${config.PREFIX}shuffle\` - xáo trộn queue`,
-      `\`${config.PREFIX}mood <auto|calm|focus|happy|sad|energetic|sleep|romantic>\` - mood DJ`,
-      `\`${config.PREFIX}persona <cute|lofi|chaotic|formal>\` - tính cách Peach`,
-      `\`${config.PREFIX}atmosphere [on|off]\` / \`${config.PREFIX}radio [on|off]\` - social mode`,
-      `\`${config.PREFIX}smartqueue [on|off]\` - queue thông minh`,
-      `\`${config.PREFIX}remember <ghi chú>\` / \`${config.PREFIX}memory\` / \`${config.PREFIX}forgetme\` - memory có kiểm soát`,
-      `\`${config.PREFIX}leave\` - rời voice channel`,
-      `\`${config.PREFIX}status\` - xem trạng thái bot`,
+      '🍑 **PeachBot Help**',
+      'Dùng slash command (`/`) là cách được khuyến nghị. Prefix command chỉ hoạt động khi `ENABLE_PREFIX_COMMANDS=true`.',
+      '',
+      '**🎵 Phát nhạc**',
+      '`/join` - Peach vào voice channel bạn đang đứng và mở panel.',
+      '`/play` - phát toàn bộ nhạc trong `music/`.',
+      '`/play playlist:<tên>` - phát playlist là một folder con trong `music/`.',
+      '`/play query:<từ khóa hoặc URL YouTube>` - lọc file hoặc stream YouTube.',
+      '`/playlists` - xem playlist hiện có.',
+      '`/panel` - mở panel nút/menu điều khiển nhạc.',
+      '',
+      '**⏯️ Điều khiển**',
+      '`/pause`, `/resume` - tạm dừng hoặc phát tiếp.',
+      '`/skip` - chuyển bài; `/stop` - dừng nhạc và xóa queue.',
+      '`/leave` - rời voice channel.',
+      '`/volume percent:<0-200>` - chỉnh âm lượng.',
+      '`/nowplaying` - xem bài, volume và chế độ phát hiện tại.',
+      '`/queue page:<số trang>` - xem queue; `/remove position:<vị trí>` - xóa một bài.',
+      '`/clear` - xóa các bài đang chờ; `/list filter:<từ khóa>` - tìm file local.',
+      '',
+      '**🔁 Chế độ phát**',
+      '`/loop enabled:<true|false>` - lặp toàn bộ playlist.',
+      '`/repeat mode:<off|one|all>` - tắt, lặp bài hiện tại hoặc lặp playlist.',
+      '`/random enabled:<true|false>` - chọn bài tiếp theo ngẫu nhiên.',
+      '`/shuffle` - xáo trộn queue.',
+      '`/ducking enabled:<true|false>` - tự giảm nhạc khi có người nói.',
+      '',
+      '**⏰ Todo và báo thức**',
+      '`/todo` - nhập title, description tùy chọn, hour và minute. Peach sẽ DM khi đến giờ.',
+      '`/alarm` - nhập title, hour, minute và file nhạc/URL YouTube. Alarm tạm dừng bài cũ, hiện nút tắt hoặc delay 10 phút rồi resume.',
+      '`/reminders` - xem số todo và báo thức đang chờ.',
+      'Giờ dùng định dạng 24h và múi giờ `PEACH_TIMEZONE`.',
+      '',
+      '**💧 Social mode**',
+      '`/water mode` - chọn `off`, `all` hoặc `selected` để nhắc uống nước.',
+      '`/water add`, `/water remove` - thêm/bỏ người được nhắc.',
+      '`/water interval` - đặt khoảng nhắc từ 5 đến 240 phút.',
+      '`/water status` - xem cấu hình nhắc nước.',
+      '`/mood`, `/persona` - đổi mood và tính cách Peach.',
+      '`/atmosphere`, `/radio`, `/smartqueue` - bật/tắt các chế độ tự động.',
+      '',
+      '**🤖 AI và memory**',
+      'Khi AI được bật, hãy gọi Peach trong text chat của voice channel để bot đọc ngữ cảnh và trả lời.',
+      '`/remember`, `/memory`, `/forgetme` - lưu, xem hoặc xóa memory cá nhân.',
+      '`/status` - xem voice connection, player, queue và quyền bot.',
+      '',
+      '**Ví dụ prefix**',
+      `\`${config.PREFIX}play playlist:lofi\``,
+      `\`${config.PREFIX}todo 20:30 | Học bài | Ôn chương 1\``,
+      `\`${config.PREFIX}alarm 07:00 | Dậy học | alarm.mp3\``,
+      `\`${config.PREFIX}water all\``,
+      `\`${config.PREFIX}help\``,
     ].join('\n');
+  }
+
+  function getHelpPages(maxLength = 1_900) {
+    const pages = [];
+    let current = '';
+    for (const line of getHelpText().split('\n')) {
+      if (line.length > maxLength) {
+        if (current) pages.push(current);
+        pages.push(line.slice(0, maxLength));
+        current = '';
+        continue;
+      }
+      const next = current ? `${current}\n${line}` : line;
+      if (next.length > maxLength) {
+        pages.push(current);
+        current = line;
+      } else {
+        current = next;
+      }
+    }
+    if (current) pages.push(current);
+    return pages;
+  }
+
+  async function handleHelp(message) {
+    const pages = getHelpPages();
+    await message.reply(pages[0]);
+    for (const page of pages.slice(1)) await message.channel.send(page);
   }
 
   async function handlePrefixMessage(message) {
@@ -701,7 +753,7 @@ function createCommandService({ client, config, music, ui, state, social, remind
           await message.reply(`\`\`\`text\n${music.getVoiceStatusSummary(message.guild)}\n\`\`\``);
           break;
         case 'help':
-          await message.reply(getHelpText());
+          await handleHelp(message);
           break;
         default:
           break;
@@ -973,6 +1025,9 @@ function createCommandService({ client, config, music, ui, state, social, remind
         break;
       case 'status':
         await respondToInteraction(interaction, async () => `\`\`\`text\n${music.getVoiceStatusSummary(interaction.guild)}\n\`\`\``);
+        break;
+      case 'help':
+        await respondToInteraction(interaction, async () => getHelpText());
         break;
       case 'panel':
         await respondToInteraction(interaction, async () => ui.buildMusicPanel(interaction.guild));

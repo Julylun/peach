@@ -1,66 +1,69 @@
-# Discord Local Music Bot
+# PeachBot
 
-Bot Discord đơn giản để phát nhạc từ file local như `.mp3`, `.wav`, `.ogg`, `.opus`, `.webm`, `.m4a`, `.flac` và stream audio từ URL YouTube.
+PeachBot là Discord bot hỗ trợ phòng học, phòng thư giãn và phòng nghe nhạc. Bot phát nhạc local hoặc YouTube vào voice channel, điều khiển bằng panel, hỗ trợ playlist, nhắc việc, báo thức, tự giảm âm lượng khi có người nói và có AI để trò chuyện trong text channel của voice room.
+
+## Tác giả
+
+- Người phát triển: **Hoang Luan (JulyLun)**
+- Tên bot: **PeachBot**
+- Nền tảng: Node.js, Discord.js, Discord Voice, FFmpeg và yt-dlp
 
 ## Tính năng
 
-- Slash commands mặc định:
-  - `/join` - vào voice channel của bạn
-  - `/play [playlist] [query]` - phát một playlist, toàn bộ `music/` hoặc URL YouTube
-  - `/playlists` - xem playlist và chọn bằng autocomplete của `/play`
-  - `/ducking [enabled]` - tự giảm âm lượng khi có người nói
-  - `/water mode|add|remove|interval|status` - nhắc uống nước theo room hoặc từng người
-  - `/todo title description hour minute` - đặt việc cần làm, Peach DM khi đến giờ
-  - `/alarm title hour minute music` - đặt báo thức phát nhạc trong voice room
-  - `/reminders` - xem số todo và báo thức đang chờ trên hệ thống
-  - `/queue` - xem danh sách đang chờ
-  - `/list [filter]` - liệt kê file nhạc trong thư mục local
-  - `/skip` - bỏ qua bài hiện tại
-  - `/stop` - dừng phát và xoá queue
-  - `/leave` - rời voice channel
-  - `/status` - xem trạng thái bot/voice/queue
-  - `/panel` - mở panel điều khiển trực tiếp bằng nút và menu
-  - `/loop [enabled]` - lặp playlist vô hạn
-  - `/repeat mode` - `off`, lặp bài hiện tại (`one`) hoặc lặp playlist (`all`)
-  - `/random [enabled]` - chọn bài kế tiếp ngẫu nhiên
-  - `/shuffle` - xáo trộn queue hiện tại
-  - `/pause`, `/resume`, `/volume`, `/nowplaying`
-  - `/remove position`, `/clear`, `/queue page`
-  - `/mood`, `/persona` - DJ mood và tính cách Peach
-  - `/atmosphere`, `/radio`, `/smartqueue` - bật/tắt các chế độ social
-  - `/remember`, `/memory`, `/forgetme` - memory có kiểm soát theo từng người dùng
-- Prefix commands `!join`, `!play`, ... chỉ chạy khi bật `ENABLE_PREFIX_COMMANDS=true`
-- Slash command phản hồi bằng embed PeachBot màu hồng, có tiêu đề và trạng thái dễ đọc.
-- `/panel` được chia thành nhóm `Phát nhạc`, `Queue` và `Chế độ Peach`, có nút `Play all`, `Pause`, `Resume`, `Skip`, `Stop`, `Shuffle`, `Random`, `Clear`, `Leave` cùng menu `Repeat`/`Volume`. Nút `Modes/Playlists` đổi giữa selector playlist và selector persona/mood.
-- `/join` cũng tự mở panel sau khi bot vào voice channel.
-- Panel tự refresh theo `PANEL_REFRESH_SECONDS`, có menu đổi mood/persona và bật/tắt atmosphere, radio host, smart queue.
-- Peach có lời chào khi người dùng vào/rời voice room; `VOICE_GREETING_ENABLED=false` để tắt.
-- Smart mood DJ ưu tiên file có tên phù hợp mood; smart queue tránh thêm trùng và hạn chế lặp các bài vừa phát.
-- Atmosphere chỉ nhắn khi voice room có người và im lặng đủ lâu; Radio Host định kỳ giới thiệu bài đang phát.
-- Gemini AI có thể đọc lịch sử gần nhất, chỉ trả lời khi người dùng đang gọi Peach, và react tin nhắn bằng emoji phù hợp. Peach có thể dùng nhiều emoji Unicode trong câu trả lời, không bị giới hạn ở một danh sách cố định.
-- Peach hiểu một số yêu cầu DJ tự nhiên trong voice chat như “phát playlist”, “tạm dừng”, “phát tiếp”, “skip”, “dừng nhạc”, “rời voice” và “xem trạng thái”, không cần gõ slash command.
-- Nếu Peach đang xử lý một tin nhắn mà có tin nhắn mới gọi bot, Peach giữ lại tin nhắn mới nhất để xử lý tiếp thay vì bỏ qua.
+- Phát toàn bộ nhạc trong `music/`, một playlist hoặc file được lọc theo tên.
+- Hỗ trợ `.mp3`, `.wav`, `.ogg`, `.opus`, `.webm`, `.m4a`, `.flac`, `.aac`, `.mka` và các định dạng FFmpeg đọc được.
+- Stream audio từ URL YouTube bằng `yt-dlp`, không lưu video vào thư mục nhạc.
+- Playlist được tổ chức bằng folder con trong `music/`.
+- Panel điều khiển bằng button và select menu.
+- Loop playlist, repeat bài, random next, shuffle, smart queue và crossfade.
+- Auto ducking: tự hạ âm lượng khi có người nói trong voice channel.
+- Atmosphere, Radio Host, lời chào voice và nhắc uống nước.
+- Todo gửi DM khi đến giờ.
+- Alarm tạm dừng bài hiện tại, phát nhạc báo thức, cho phép tắt hoặc delay 10 phút rồi resume.
+- AI Peach đọc lịch sử tin nhắn, ảnh đính kèm và chỉ phản hồi khi nội dung liên quan đến bot.
+- Memory cá nhân do người dùng chủ động lưu.
 
-## Cấu trúc
+## Yêu cầu
 
-```text
-src/
-├── index.js              # khởi tạo client và nối các event/service
-├── config.js             # đọc, kiểm tra và chuẩn hóa biến môi trường
-├── commands.js           # slash commands và prefix commands
-├── ui.js                 # embed, music panel, button/select interactions
-├── ai/
-│   ├── gemini.js         # LangChain pipeline phân loại và sinh response
-│   └── prompts.js        # ChatPromptTemplate và output schemas
-├── music/
-│   └── service.js        # voice connection, queue, FFmpeg, playback state
-├── reminders.js          # todo, alarm scheduler, DM và alarm panel
-├── social.js             # greeting, atmosphere và radio host
-└── state/
-    └── store.js          # settings guild và memory giới hạn
+- Node.js `22.12+`.
+- FFmpeg trong PATH khi chạy trực tiếp.
+- yt-dlp trong PATH nếu muốn phát YouTube.
+- Một Discord application có bot token.
+- Bot cần các quyền Discord cơ bản:
+  - View Channel
+  - Send Messages
+  - Embed Links
+  - Read Message History
+  - Connect
+  - Speak
+
+Nếu bật AI hoặc prefix command, bật thêm **Message Content Intent** trong Discord Developer Portal. Gateway intent `Guild Voice States` cũng cần được bật trong code và bot phải được cấp quyền voice ở channel cần sử dụng.
+
+## Cài đặt nhanh
+
+```bash
+fnm exec --using v25.9.0 npm install
+cp .env.example .env
 ```
 
-Đặt nhạc vào thư mục `music/`; mỗi folder con trực tiếp là một playlist:
+Mở `.env` và điền ít nhất:
+
+```env
+DISCORD_TOKEN=your-discord-bot-token
+DISCORD_GUILD_ID=your-test-server-id
+```
+
+Chạy bot:
+
+```bash
+fnm exec --using v25.9.0 npm start
+```
+
+Khi dùng `DISCORD_GUILD_ID`, slash command được đăng ký trực tiếp trong server và thường xuất hiện nhanh hơn global command. Sau khi thêm hoặc sửa slash command, restart bot để đăng ký lại.
+
+## Thư viện nhạc và playlist
+
+Mỗi folder con trực tiếp trong `music/` là một playlist:
 
 ```text
 music/
@@ -68,117 +71,226 @@ music/
 │   ├── rainy-night.mp3
 │   └── study.wav
 ├── energetic/
-│   └── workout.mp3
-└── welcome.mp3       # file root thuộc playlist default
+│   └── workout.opus
+└── welcome.mp3
 ```
 
-`/play playlist:lofi` phát playlist `lofi`, `/play playlist:all` hoặc `/play` không chọn playlist phát toàn bộ nhạc trong `music/`. Dùng `/playlists` để xem danh sách; option `playlist` của `/play` có autocomplete.
+- File ở root thuộc playlist `default`.
+- `/play` phát toàn bộ file trong `music/`.
+- `/play playlist:lofi` chỉ phát playlist `lofi`.
+- `/play playlist:all` phát toàn bộ thư viện.
+- `/playlists` xem danh sách playlist.
+- `/list filter:study` tìm file theo tên hoặc đường dẫn.
 
-Đặt nhắc việc bằng slash command:
+## Hướng dẫn lệnh
+
+Gõ `/help` trong Discord để xem help trực tiếp. Nếu bật prefix command, dùng `!help` hoặc prefix được cấu hình trong `COMMAND_PREFIX`.
+
+### Kết nối và panel
+
+| Lệnh | Chức năng |
+| --- | --- |
+| `/join` | Peach vào voice channel bạn đang đứng và tự mở panel. |
+| `/panel` | Mở lại panel điều khiển nhạc. |
+| `/status` | Xem voice state, player state, bài hiện tại, queue và quyền bot. |
+| `/leave` | Dừng kết nối và rời voice channel. |
+| `/help` | Xem hướng dẫn lệnh. |
+
+Panel có các nhóm điều khiển phát nhạc, queue, playlist và settings. Chọn playlist trong panel rồi bấm `Play` để phát mà không cần gõ `/play`.
+
+### Phát nhạc
+
+| Lệnh | Chức năng |
+| --- | --- |
+| `/play` | Phát toàn bộ thư mục `music/`. |
+| `/play playlist:<name>` | Phát playlist được chọn. |
+| `/play query:<text>` | Lọc file local theo tên hoặc stream URL YouTube. |
+| `/pause` | Tạm dừng bài hiện tại. |
+| `/resume` | Phát tiếp bài đang tạm dừng. |
+| `/skip` | Chuyển bài. |
+| `/stop` | Dừng nhạc và xóa queue đang chờ. |
+| `/volume percent:<0-200>` | Chỉnh âm lượng. |
+| `/nowplaying` | Xem bài hiện tại và chế độ phát. |
+| `/queue page:<number>` | Xem queue theo trang. |
+| `/remove position:<number>` | Xóa một bài khỏi queue. |
+| `/clear` | Xóa các bài đang chờ, không dừng bài hiện tại. |
+
+Ví dụ:
 
 ```text
-/todo title:"Học bài" description:"Chương 1" hour:20 minute:30
+/play
+/play playlist:lofi
+/play query:rain
+/play query:https://www.youtube.com/watch?v=...
+```
+
+### Chế độ phát
+
+| Lệnh | Chức năng |
+| --- | --- |
+| `/loop enabled:true` | Lặp toàn bộ playlist vô hạn. |
+| `/repeat mode:off` | Tắt repeat. |
+| `/repeat mode:one` | Lặp bài hiện tại. |
+| `/repeat mode:all` | Lặp playlist. |
+| `/random enabled:true` | Chọn bài kế tiếp ngẫu nhiên. |
+| `/shuffle` | Xáo trộn queue. |
+| `/ducking enabled:true` | Tự giảm nhạc khi có người nói. |
+| `/mood value:focus` | Ưu tiên bài phù hợp mood. |
+| `/smartqueue enabled:true` | Hạn chế thêm trùng và lặp bài gần đây. |
+
+Các mood hiện có: `auto`, `calm`, `focus`, `happy`, `sad`, `energetic`, `sleep`, `romantic`.
+
+### Todo và báo thức
+
+Todo và alarm dùng giờ 24h theo `PEACH_TIMEZONE`, mặc định là `Asia/Ho_Chi_Minh`.
+
+```text
+/todo title:"Học bài" description:"Ôn chương 1" hour:20 minute:30
 /alarm title:"Dậy học" hour:7 minute:0 music:"alarm.mp3"
 /reminders
 ```
 
-Todo được gửi vào DM của người đặt. Báo thức sẽ tạm dừng bài đang phát, phát nhạc báo tối đa `ALARM_DURATION_SECONDS` (mặc định 90 giây), hiện nút `Tắt báo thức` hoặc `Delay 10 phút`, rồi tiếp tục bài cũ từ vị trí đã dừng. Thời gian dùng múi giờ `PEACH_TIMEZONE` và reminder được lưu trong `data/peach-state.json` để không mất khi restart.
+- `/todo`: description có thể bỏ trống; đến giờ Peach gửi DM cho người đặt.
+- `/alarm`: music nhận tên file, bộ lọc file local hoặc URL YouTube.
+- Khi alarm chạy, bài đang phát được pause tại vị trí hiện tại.
+- Peach phát alarm tối đa `ALARM_DURATION_SECONDS`, mặc định 90 giây.
+- Panel alarm có `Tắt báo thức` và `Delay 10 phút`.
+- Khi alarm kết thúc hoặc bị tắt, bài cũ được resume.
+- `/reminders`: xem tổng số todo và alarm đang ở trạng thái chờ/ringing.
 
-Để phát YouTube, gửi URL vào option `query` của `/play`, dùng `!play <url>`, hoặc nói tự nhiên với Peach như “Peach phát link YouTube này”. Bot dùng `yt-dlp` stream audio trực tiếp qua FFmpeg, không lưu video/audio vào thư mục `music/`.
+Alarm là reminder một lần. Nếu dùng `Delay 10 phút`, alarm được tạo lại ở thời điểm mới.
 
-## Cài đặt
+### Social mode
 
-1. Dùng Node.js `22.12+` (máy này đã có Node `25.9.0` qua `fnm`), sau đó cài dependencies:
+| Lệnh | Chức năng |
+| --- | --- |
+| `/water mode value:off` | Tắt nhắc uống nước. |
+| `/water mode value:all` | Nhắc tất cả người đang ở cùng voice room. |
+| `/water mode value:selected user:@user` | Chọn user được nhắc. |
+| `/water add user:@user` | Thêm user vào danh sách được nhắc. |
+| `/water remove user:@user` | Bỏ user khỏi danh sách. |
+| `/water interval minutes:60` | Đặt khoảng nhắc từ 5 đến 240 phút. |
+| `/water status` | Xem cấu hình hiện tại. |
+| `/persona value:cute` | Đổi tính cách phản hồi. |
+| `/atmosphere enabled:true` | Bật lời nhắc không khí trong room. |
+| `/radio enabled:true` | Bật Radio Host giới thiệu bài. |
 
-```bash
-fnm exec --using v25.9.0 npm install
+Water reminder mặc định tắt.
+
+### Memory
+
+```text
+/remember note:"Tôi thường học vào buổi tối"
+/memory
+/forgetme
 ```
 
-2. Tạo file `.env` từ `.env.example` và điền `DISCORD_TOKEN`
-   - Nên điền thêm `DISCORD_GUILD_ID` để slash commands xuất hiện ngay trong server test
-   - Nếu bật Gemini AI, đặt `AI_ENABLED=true`, điền `GEMINI_API_KEY`, sau đó bật `Message Content Intent` trong Discord Developer Portal
+Memory chỉ được lưu khi user chủ động dùng `/remember` và có thể xóa bằng `/forgetme`.
 
-3. Khởi động bot:
+## AI Peach
 
-```bash
-fnm exec --using v25.9.0 npm start
-```
+AI sử dụng Google Gemini thông qua LangChain. Bot xử lý hai giai đoạn:
 
-Sau khi bot chạy, gõ `/panel` trong một text channel. Nếu command chưa xuất hiện, hãy kiểm tra `DISCORD_GUILD_ID` trong `.env` rồi restart bot để đăng ký lại slash commands trong server.
+1. Phân tích message, lịch sử và ảnh để xác định có đang gọi hoặc hỏi Peach hay không.
+2. Nếu có liên quan, Peach hiển thị typing rồi sinh câu trả lời.
 
-### Gemini AI
+AI đọc text channel của voice room mà bot đang tham gia khi `AI_USE_CURRENT_VOICE_CHANNEL=true`. Có thể khóa channel bằng `AI_CHANNEL_ID`. Bot không tự nghe hoặc chuyển giọng nói trong voice channel thành text.
 
-Google AI Studio cung cấp Gemini API key; bot dùng LangChain với `@langchain/google-genai`. Khi `AI_ENABLED=true`, bot chạy hai giai đoạn: giai đoạn 1 phân loại mức độ liên quan không hiển thị typing, giai đoạn 2 mới sinh câu trả lời và hiển thị typing. Mặc định bot tự lấy ID voice channel mà nó đang join; khi bot chuyển room, channel AI cũng tự chuyển theo. Có thể đặt `AI_CHANNEL_ID` nếu muốn khóa cố định một channel.
-
-Các biến liên quan:
+Cấu hình tối thiểu:
 
 ```env
 AI_ENABLED=true
 GEMINI_API_KEY=your-google-gemini-api-key
-GEMINI_MODEL=gemini-2.5-flash-lite
-AI_CHANNEL_ID=
+GEMINI_MODEL=gemma-4-31b-it
 AI_USE_CURRENT_VOICE_CHANNEL=true
 AI_ONLY_VOICE_CHANNEL=true
 AI_REQUIRE_BOT_IN_VOICE=false
 ```
 
-Các mode của Peach:
+Ảnh trong message/history được giới hạn bởi `AI_IMAGE_MAX_BYTES`, `AI_IMAGE_MAX_COUNT` và `AI_HISTORY_IMAGE_MAX_COUNT`. Khả năng nhận ảnh còn phụ thuộc model/provider thực tế đang được Google API cung cấp.
+
+AI retry lỗi mạng, timeout, rate limit `429` và lỗi server `5xx` theo `AI_API_RETRIES` và `AI_API_RETRY_BASE_MS`. Không gửi nội dung nhạy cảm vào channel AI nếu không muốn đưa dữ liệu tới provider.
+
+## Cấu hình môi trường
+
+Các biến thường dùng trong `.env`:
 
 ```env
-PEACH_PERSONA=cute
-ATMOSPHERE_ENABLED=false
-RADIO_HOST_ENABLED=false
-VOICE_GREETING_ENABLED=true
-SMART_QUEUE_ENABLED=true
-PEACH_MOOD=auto
-PEACH_MEMORY_ENABLED=true
-PEACH_MEMORY_MAX_NOTES=5
-PANEL_REFRESH_SECONDS=15
-ATMOSPHERE_IDLE_MINUTES=10
-RADIO_HOST_EVERY_TRACKS=3
-AUTO_DUCKING_ENABLED=true
-DUCKING_VOLUME=0.35
-WATER_REMINDER_INTERVAL_MINUTES=60
+DISCORD_TOKEN=
+DISCORD_GUILD_ID=
+PEACH_TIMEZONE=Asia/Ho_Chi_Minh
+MUSIC_DIR=./music
+PEACH_STATE_FILE=./data/peach-state.json
+FFMPEG_PATH=ffmpeg
+YTDLP_PATH=yt-dlp
+AUDIO_VOLUME=1.15
+OPUS_BITRATE=128000
+LOOP_PLAYLIST=false
+RANDOM_NEXT=true
+REPEAT_MODE=off
+CROSSFADE_SECONDS=5
+CROSSFADE_BATCH_SIZE=8
+ALARM_DURATION_SECONDS=90
+COMMAND_PREFIX=!
+ENABLE_PREFIX_COMMANDS=false
+VOICE_DEBUG=true
 ```
 
-Nội dung tin nhắn, lịch sử và tối đa `AI_HISTORY_IMAGE_MAX_COUNT` ảnh đính kèm trong history được gửi tới Google Gemini khi tính năng bật. Lịch sử được gửi thành từng `contents` riêng với `role=user`; mỗi content có dạng `<nickname>...</nickname><content>...</content><is_latest>...</is_latest>` để model phân biệt người dùng và nhận biết tin nhắn cuối. Ảnh vượt `AI_IMAGE_MAX_BYTES` sẽ bị bỏ qua; không bật AI trong các channel không muốn đưa dữ liệu ra ngoài.
+Các biến AI, social, memory và cấu hình đầy đủ nằm trong `.env.example`.
 
-LangChain/Gemini sẽ retry tối đa `AI_API_RETRIES` lần sau lần gọi đầu với lỗi mạng, timeout, rate limit `429` hoặc lỗi server `5xx`, dùng exponential backoff. Lỗi API key/model/request không hợp lệ sẽ debug ngay.
+## Docker Compose
 
-Ảnh trong history cũng được gửi cho giai đoạn phân loại, tối đa `AI_HISTORY_IMAGE_MAX_COUNT` ảnh; trong giai đoạn 1 bot không hiển thị trạng thái đang nhập. Khi giai đoạn 1 xác định tin nhắn có liên quan, bot mới hiển thị typing trong lúc giai đoạn 2 sinh câu trả lời.
-
-## Chạy bằng Docker Compose
-
-Docker sẽ tự đọc `DISCORD_TOKEN` và các cấu hình khác từ file `.env`. Thư mục `music/` trên máy được mount vào `/app/music` trong container, nên thêm hoặc xóa nhạc không cần build lại image.
-Thư mục `data/` cũng được mount vào `/app/data` để todo và báo thức không mất khi container được recreate.
+Docker tự đọc biến môi trường từ `.env`:
 
 ```bash
 docker compose up -d --build
 docker compose logs -f peachbot
 ```
 
-Dừng bot:
+Chạy nền và không phụ thuộc terminal hiện tại vì container có `restart: unless-stopped`.
 
 ```bash
+docker compose ps
+docker compose restart peachbot
 docker compose down
 ```
 
-`MUSIC_DIR` và `FFMPEG_PATH` trong Compose được cố định thành đường dẫn bên trong container; không cần sửa hai biến này trong `.env` khi chạy Docker.
+Compose mount:
+
+- `./music` vào `/app/music` để cập nhật nhạc không cần build lại.
+- `./data` vào `/app/data` để giữ settings, memory, todo và alarm sau khi recreate container.
+
+## Cấu trúc mã nguồn
+
+```text
+src/
+├── index.js              # khởi tạo client và nối các service
+├── config.js             # đọc và chuẩn hóa biến môi trường
+├── commands.js           # slash command và prefix command
+├── ui.js                 # embed, panel và interaction
+├── reminders.js          # todo, alarm scheduler, DM và alarm panel
+├── social.js             # greeting, atmosphere, radio và water reminder
+├── ai/
+│   ├── gemini.js         # LangChain Gemini pipeline
+│   └── prompts.js        # prompt templates và schema
+├── music/
+│   └── service.js        # voice connection, queue, FFmpeg, playback
+└── state/
+    └── store.js          # settings, memory và reminder persistence
+```
+
+## Xử lý lỗi thường gặp
+
+- Slash command không xuất hiện: kiểm tra `DISCORD_GUILD_ID`, quyền bot và restart bot.
+- `Used disallowed intents`: bật các privileged intents tương ứng trong Developer Portal.
+- Bot không vào voice: cấp `View Channel`, `Connect` và `Speak` cho bot trong voice channel.
+- YouTube không phát: kiểm tra `yt-dlp --version`, URL và log FFmpeg.
+- Todo không DM được: user cần cho phép Direct Messages từ server.
+- Alarm không phát: bot cần đang ở voice hoặc phải có quyền vào voice channel đã lưu trong reminder.
 
 ## Ghi chú
 
-- Máy chạy bot cần có `ffmpeg` hoặc đặt đường dẫn vào biến môi trường `FFMPEG_PATH`.
-- Máy chạy bot cần có `yt-dlp` trong PATH hoặc đặt `YTDLP_PATH`; Dockerfile đã cài sẵn `yt-dlp`.
-- Định dạng audio được nhận diện gồm `.mp3`, `.wav`, `.ogg`, `.oga`, `.opus`, `.m4a`, `.m4b`, `.flac`, `.aac`, `.webm`, `.weba` và `.mka`; FFmpeg sẽ giải mã về PCM 48 kHz stereo trước khi gửi vào Discord.
-- Project ưu tiên encoder native `@discordjs/opus` để giảm tải CPU; `opusscript@0.0.x` được giữ làm fallback tương thích với `prism-media`.
-- Âm lượng mặc định là `1.15x`; chỉnh bằng `AUDIO_VOLUME` trong khoảng `0` đến `2` nếu cần.
-- Chất lượng Opus mặc định là `128 kbps`; chỉnh bằng `OPUS_BITRATE` nếu server giới hạn bitrate voice.
-- `CROSSFADE_SECONDS=5` nối các bài trong cùng một cụm bằng fade in/out; đặt `0` để tắt.
-- `CROSSFADE_BATCH_SIZE=8` là số bài được ghép trong một pipeline FFmpeg.
-- Có thể bật loop ngay khi khởi động bằng `LOOP_PLAYLIST=true`; random mặc định bật qua `RANDOM_NEXT=true`.
-- Discord voice hiện yêu cầu DAVE/E2EE; project đã dùng `@discordjs/voice 0.19.x` và `@snazzah/davey` để hỗ trợ việc này.
-- Nếu muốn dùng prefix command, hãy bật `ENABLE_PREFIX_COMMANDS=true` và `Message Content Intent` trong Discord Developer Portal.
-- `VOICE_DEBUG=true` mặc định bật log handshake voice; token và session id sẽ được ẩn trong log.
-- Settings guild và memory được lưu ở `data/peach-state.json`; thư mục này đã nằm trong `.gitignore`. Memory chỉ được lưu khi người dùng chủ động gọi `/remember` và có thể xóa bằng `/forgetme`.
-- Water reminder mặc định tắt. Dùng `/water mode` với `off`, `all` hoặc `selected`; dùng `/water add`, `/water remove` và `/water interval` để chọn người và thời gian. Chỉ những người đang ở cùng voice room với bot mới được mention.
-- Auto ducking cần bot nhận voice packet nên connection dùng `selfDeaf=false`; âm lượng hạ xuống theo `DUCKING_VOLUME` khi có người nói và tự khôi phục sau đó.
+- State runtime nằm ở `data/peach-state.json`; thư mục `data/` không được commit.
+- `VOICE_DEBUG=true` hữu ích khi chẩn đoán voice handshake nhưng tạo nhiều log.
+- `AUDIO_VOLUME` nằm trong khoảng `0` đến `2`; `OPUS_BITRATE` tối đa mặc định là `128000`.
+- FFmpeg chuyển audio về PCM 48 kHz stereo trước khi gửi vào Discord.
