@@ -17,6 +17,7 @@ function createMusicService({ client, config, stateStore }) {
   const guildStates = new Map();
   const observedNetworkings = new WeakSet();
   const events = new EventEmitter();
+  const youtubeMetadataCache = new Map();
   const SUPPORTED_AUDIO_EXTENSIONS = [
     '.mp3', '.wav', '.ogg', '.oga', '.opus', '.m4a', '.m4b',
     '.flac', '.aac', '.webm', '.weba', '.mka',
@@ -134,6 +135,7 @@ function createMusicService({ client, config, stateStore }) {
         randomEnabled: config.RANDOM_NEXT_DEFAULT,
         smartQueue: stateStore?.getGuildSettings(guildId).smartQueue ?? config.SMART_QUEUE_DEFAULT,
         mood: stateStore?.getGuildSettings(guildId).mood || config.MOOD_DEFAULT,
+        ducking: stateStore?.getGuildSettings(guildId).ducking ?? config.AUTO_DUCKING_DEFAULT,
         current: null,
         activeResource: null,
         invalidTracks: new Set(),
@@ -142,6 +144,8 @@ function createMusicService({ client, config, stateStore }) {
         connection: null,
         ffmpegProcess: null,
         ytdlpProcess: null,
+        speakingUsers: new Set(),
+        alarmSession: null,
         textChannelId: null,
         waitingForReady: false,
         voiceReconnectAttempts: 0,
@@ -192,18 +196,60 @@ function createMusicService({ client, config, stateStore }) {
     }
   }
 
+  function applyDuckingVolume(state) {
+    const targetVolume = state.ducking && state.speakingUsers.size > 0
+      ? state.volume * config.DUCKING_VOLUME
+      : state.volume;
+    state.activeResource?.volume?.setVolume(targetVolume);
+  }
+
+  function attachSpeakingDucking(connection, guildId, state) {
+    const speaking = connection.receiver?.speaking;
+    if (!speaking?.on) return;
+
+    state.speakingUsers.clear();
+    speaking.on('start', (userId) => {
+      if (userId === client.user?.id) return;
+      state.speakingUsers.add(userId);
+      applyDuckingVolume(state);
+      console.log(`[voice:${guildId}] ducking start user=${userId}`);
+    });
+    speaking.on('end', (userId) => {
+      state.speakingUsers.delete(userId);
+      applyDuckingVolume(state);
+      console.log(`[voice:${guildId}] ducking end user=${userId}`);
+    });
+  }
+
+  function setDucking(guildId, enabled) {
+    const state = getState(guildId);
+    state.ducking = Boolean(enabled);
+    stateStore?.updateGuildSettings(guildId, { ducking: state.ducking });
+    applyDuckingVolume(state);
+    return state.ducking;
+  }
+
+  function setVolume(guildId, volume) {
+    const state = getState(guildId);
+    state.volume = Math.max(0, Math.min(2, Number(volume)));
+    applyDuckingVolume(state);
+    return state.volume;
+  }
+
   function createVoiceConnection(guild, voiceChannel, state) {
     const connection = joinVoiceChannel({
       channelId: voiceChannel.id,
       guildId: guild.id,
       adapterCreator: createDebugVoiceAdapterCreator(guild),
-      selfDeaf: true,
+      // Receiving voice packets is required for SpeakingMap-based auto ducking.
+      selfDeaf: false,
       selfMute: false,
       debug: config.VOICE_DEBUG,
       daveEncryption: true,
     });
 
     attachConnectionDebug(connection, guild.id);
+    attachSpeakingDucking(connection, guild.id, state);
     connection.subscribe(state.player);
     state.connection = connection;
 
@@ -309,6 +355,74 @@ function createMusicService({ client, config, stateStore }) {
       displayName: `YouTube • ${String(url).trim()}`,
       playlist: 'youtube',
     };
+  }
+
+  async function resolveYouTubeMetadata(url) {
+    const normalizedUrl = String(url).trim();
+    const cached = youtubeMetadataCache.get(normalizedUrl);
+    if (cached && cached.expiresAt > Date.now()) return cached.metadata;
+
+    const { spawn } = require('child_process');
+    const metadata = await new Promise((resolve) => {
+      const ytdlp = spawn(config.YTDLP_PATH, [
+        '--no-playlist',
+        '--no-warnings',
+        '--quiet',
+        '--no-progress',
+        '--dump-single-json',
+        '--skip-download',
+        '--', normalizedUrl,
+      ], { stdio: ['ignore', 'pipe', 'pipe'] });
+      let stdout = '';
+      const timeout = setTimeout(() => {
+        if (!ytdlp.killed) ytdlp.kill('SIGKILL');
+        resolve(null);
+      }, 15_000);
+      timeout.unref?.();
+
+      ytdlp.stdout.on('data', (chunk) => {
+        stdout = `${stdout}${chunk}`.slice(-1_000_000);
+      });
+      ytdlp.on('error', () => {
+        clearTimeout(timeout);
+        resolve(null);
+      });
+      ytdlp.on('close', (code) => {
+        clearTimeout(timeout);
+        if (code !== 0) {
+          resolve(null);
+          return;
+        }
+        try {
+          const parsed = JSON.parse(stdout.trim());
+          resolve({
+            title: typeof parsed.title === 'string' ? parsed.title.trim() : '',
+            uploader: typeof parsed.uploader === 'string' ? parsed.uploader.trim() : '',
+          });
+        } catch {
+          resolve(null);
+        }
+      });
+    });
+
+    youtubeMetadataCache.set(normalizedUrl, {
+      metadata,
+      expiresAt: Date.now() + 10 * 60_000,
+    });
+    return metadata;
+  }
+
+  async function createResolvedYouTubeTrack(url) {
+    const track = createYouTubeTrack(url);
+    const metadata = await resolveYouTubeMetadata(url);
+    if (metadata?.title) {
+      track.displayName = metadata.uploader
+        ? `${metadata.title} • ${metadata.uploader}`
+        : metadata.title;
+      track.youtubeTitle = metadata.title;
+      track.youtubeUploader = metadata.uploader;
+    }
+    return track;
   }
 
   function collectPlayableTracksFromDirectory(filterText = '', rootDir = config.MUSIC_DIR, playlistName = '') {
@@ -433,6 +547,7 @@ function createMusicService({ client, config, stateStore }) {
       `Repeat: ${state?.repeatMode || 'off'}`,
       `Random next: ${state?.randomEnabled ? 'on' : 'off'}`,
       `Smart queue: ${state?.smartQueue ? 'on' : 'off'}`,
+      `Auto ducking: ${state?.ducking ? 'on' : 'off'}`,
       `Mood: ${state?.mood || config.MOOD_DEFAULT}`,
       `Crossfade: ${config.CROSSFADE_SECONDS > 0 ? `${config.CROSSFADE_SECONDS}s` : 'off'}`,
     ];
@@ -498,6 +613,8 @@ function createMusicService({ client, config, stateStore }) {
     const state = guildStates.get(guildId);
     if (!state) return;
 
+    state.alarmSession?.finish('shutdown');
+
     if (state.ffmpegProcess && !state.ffmpegProcess.killed) state.ffmpegProcess.kill('SIGKILL');
     if (state.ytdlpProcess && !state.ytdlpProcess.killed) state.ytdlpProcess.kill('SIGKILL');
     state.queue.length = 0;
@@ -557,7 +674,7 @@ function createMusicService({ client, config, stateStore }) {
   }
 
   function listPlaylists() {
-    if (!fs.existsSync(config.MUSIC_DIR)) return [];
+    if (!fs.existsSync(config.MUSIC_DIR)) return ['all'];
     const playlists = fs.readdirSync(config.MUSIC_DIR, { withFileTypes: true })
       .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
       .map((entry) => entry.name);
@@ -585,10 +702,16 @@ function createMusicService({ client, config, stateStore }) {
     );
   }
 
-  function collectInputTracks(query = '', playlistName = '') {
+  async function collectInputTracks(query = '', playlistName = '') {
     const input = String(query || '').trim();
-    if (isYouTubeUrl(input)) return [createYouTubeTrack(input)];
+    if (isYouTubeUrl(input)) return [await createResolvedYouTubeTrack(input)];
     return playlistName ? collectPlaylistTracks(playlistName, input) : collectPlayableTracks(input);
+  }
+
+  async function resolveTrackInput(input) {
+    const tracks = await collectInputTracks(input);
+    if (tracks.length === 0) throw new Error(`Không tìm thấy nhạc phù hợp với \`${input}\`.`);
+    return tracks[0];
   }
 
   function orderTracksForMood(tracks, mood) {
@@ -825,7 +948,11 @@ function createMusicService({ client, config, stateStore }) {
     });
 
     const resource = createAudioResource(ffmpegProcess.stdout, { inputType: StreamType.Raw, inlineVolume: true });
-    resource.volume?.setVolume(state.volume);
+    resource.volume?.setVolume(
+      state.ducking && state.speakingUsers.size > 0
+        ? state.volume * config.DUCKING_VOLUME
+        : state.volume
+    );
     resource.encoder?.setBitrate(config.OPUS_BITRATE);
     resource.encoder?.setFEC(true);
     state.activeResource = resource;
@@ -834,6 +961,87 @@ function createMusicService({ client, config, stateStore }) {
     const textChannel = client.channels.cache.get(state.textChannelId);
     if (textChannel?.isTextBased()) textChannel.send(`Đang phát: \`${next.displayName}\``).catch(() => {});
     events.emit('trackStart', { guildId, track: next, textChannelId: state.textChannelId });
+  }
+
+  function startAlarm(guildId, track, durationMs = 90_000, alarmId = 'unknown') {
+    const state = guildStates.get(guildId);
+    const connection = state?.connection;
+    if (!state || !connection || connection.state.status !== VoiceConnectionStatus.Ready || state.alarmSession) {
+      return false;
+    }
+
+    const previousStatus = state.player.state.status;
+    if (previousStatus === AudioPlayerStatus.Playing) state.player.pause();
+
+    const alarmPlayer = createAudioPlayer({
+      behaviors: { noSubscriber: NoSubscriberBehavior.Play },
+    });
+    const session = {
+      finished: false,
+      ffmpegProcess: null,
+      ytdlpProcess: null,
+      timeout: null,
+      finish: null,
+    };
+    state.alarmSession = session;
+
+    const finish = (reason = 'finished') => {
+      if (session.finished) return;
+      session.finished = true;
+      if (session.timeout) clearTimeout(session.timeout);
+      if (session.ffmpegProcess && !session.ffmpegProcess.killed) session.ffmpegProcess.kill('SIGKILL');
+      if (session.ytdlpProcess && !session.ytdlpProcess.killed) session.ytdlpProcess.kill('SIGKILL');
+      alarmPlayer.stop(true);
+      if (state.connection === connection && connection.state.status !== VoiceConnectionStatus.Destroyed) {
+        connection.subscribe(state.player);
+      }
+      if (previousStatus === AudioPlayerStatus.Playing) state.player.unpause();
+      if (state.alarmSession === session) state.alarmSession = null;
+      events.emit('alarmEnd', { guildId, alarmId, reason });
+    };
+    session.finish = finish;
+
+    alarmPlayer.on(AudioPlayerStatus.Idle, () => finish('finished'));
+    alarmPlayer.on('error', (error) => {
+      console.error(`[voice:${guildId}] alarm player error`, error);
+      finish('error');
+    });
+
+    try {
+      let stream;
+      if (track.source === 'youtube') {
+        stream = createYouTubeFfmpegStream(track.url, () => finish('error'));
+        session.ffmpegProcess = stream.ffmpegProcess;
+        session.ytdlpProcess = stream.ytdlpProcess;
+      } else {
+        session.ffmpegProcess = createFfmpegStream(track.filePath, () => finish('error'));
+        stream = { ffmpegProcess: session.ffmpegProcess };
+      }
+      const resource = createAudioResource(stream.ffmpegProcess.stdout, {
+        inputType: StreamType.Raw,
+        inlineVolume: true,
+      });
+      resource.volume?.setVolume(state.volume);
+      resource.encoder?.setBitrate(config.OPUS_BITRATE);
+      resource.encoder?.setFEC(true);
+      connection.subscribe(alarmPlayer);
+      alarmPlayer.play(resource);
+      session.timeout = setTimeout(() => finish('timeout'), Math.max(30_000, Number(durationMs) || 90_000));
+      session.timeout.unref?.();
+      console.log(`[voice:${guildId}] alarm started track=${track.displayName}`);
+      return true;
+    } catch (error) {
+      console.error(`[voice:${guildId}] unable to start alarm`, error);
+      finish('error');
+      return false;
+    }
+  }
+
+  function stopAlarm(guildId) {
+    const session = guildStates.get(guildId)?.alarmSession;
+    if (!session) return false;
+    session.finish('stopped');
+    return true;
   }
 
   function appendTracks(state, tracks) {
@@ -855,7 +1063,7 @@ function createMusicService({ client, config, stateStore }) {
 
   async function enqueueTrack(message, query = '', playlistName = '') {
     const state = getState(message.guild.id);
-    const tracks = collectInputTracks(query, playlistName);
+    const tracks = await collectInputTracks(query, playlistName);
     if (tracks.length === 0) throw new Error(`Không tìm thấy file nhạc trong thư mục ${config.MUSIC_DIR}.`);
     await ensureVoiceConnection(message);
     state.textChannelId = message.channel.id;
@@ -867,7 +1075,7 @@ function createMusicService({ client, config, stateStore }) {
 
   async function enqueueTrackFromInteraction(interaction, query = '', playlistName = '') {
     const state = getState(interaction.guild.id);
-    const tracks = collectInputTracks(query, playlistName);
+    const tracks = await collectInputTracks(query, playlistName);
     if (tracks.length === 0) throw new Error(`Không tìm thấy file nhạc trong thư mục ${config.MUSIC_DIR}.`);
     await ensureVoiceConnectionFromInteraction(interaction);
     state.textChannelId = interaction.channelId;
@@ -893,8 +1101,12 @@ function createMusicService({ client, config, stateStore }) {
     cleanupAll,
     ensureVoiceConnection,
     ensureVoiceConnectionFromInteraction,
+    ensureVoiceConnectionFromChannel,
     enqueueTrack,
     enqueueTrackFromInteraction,
+    resolveTrackInput,
+    startAlarm,
+    stopAlarm,
     collectPlayableTracks: collectPlayableTracksByQuery,
     collectPlaylistTracks,
     listPlaylists,
@@ -902,6 +1114,7 @@ function createMusicService({ client, config, stateStore }) {
     shuffleInPlace,
     playNext,
     stopState(state) {
+      state.alarmSession?.finish('stopped');
       state.queue.length = 0;
       state.playlist.length = 0;
       state.repeatMode = 'off';
@@ -921,6 +1134,8 @@ function createMusicService({ client, config, stateStore }) {
     },
     setMood,
     setSmartQueue,
+    setDucking,
+    setVolume,
     getMoodOptions: () => MOODS.slice(),
     on(eventName, handler) {
       events.on(eventName, handler);

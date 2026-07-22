@@ -15,6 +15,7 @@ const RADIO_LINES = [
 function createSocialService({ client, config, state, music }) {
   const lastActivity = new Map();
   const lastAtmosphereMessage = new Map();
+  const lastWaterReminder = new Map();
   const radioTrackCounts = new Map();
   let atmosphereIndex = 0;
   let radioIndex = 0;
@@ -38,10 +39,10 @@ function createSocialService({ client, config, state, music }) {
     return null;
   }
 
-  function send(channel, content) {
+  function send(channel, content, allowedMentions = { parse: [] }) {
     const target = resolveChannel(channel);
     if (!target || typeof target.send !== 'function') return Promise.resolve(null);
-    return target.send({ content, allowedMentions: { parse: [] } }).catch((error) => {
+    return target.send({ content, allowedMentions }).catch((error) => {
       console.warn(`[social:${target.id || 'unknown'}] message failed: ${error.message}`);
       return null;
     });
@@ -103,6 +104,43 @@ function createSocialService({ client, config, state, music }) {
     return music.setSmartQueue(guildId, enabled ?? !settings.smartQueue);
   }
 
+  function setWaterReminderMode(guildId, mode) {
+    const normalized = ['off', 'all', 'selected'].includes(mode) ? mode : 'off';
+    lastWaterReminder.set(guildId, Date.now());
+    return updateSettings(guildId, { waterReminderMode: normalized });
+  }
+
+  function addWaterReminderUser(guildId, userId) {
+    const settings = getSettings(guildId);
+    const userIds = [...new Set([...(settings.waterReminderUserIds || []), userId])].slice(0, 50);
+    lastWaterReminder.set(guildId, Date.now());
+    return updateSettings(guildId, { waterReminderMode: 'selected', waterReminderUserIds: userIds });
+  }
+
+  function removeWaterReminderUser(guildId, userId) {
+    const settings = getSettings(guildId);
+    const userIds = (settings.waterReminderUserIds || []).filter((id) => id !== userId);
+    return updateSettings(guildId, { waterReminderUserIds: userIds });
+  }
+
+  function setWaterReminderInterval(guildId, minutes) {
+    const value = Number(minutes);
+    if (!Number.isInteger(value) || value < 5 || value > 240) {
+      throw new Error('Khoảng nhắc uống nước phải là số nguyên từ 5 đến 240 phút.');
+    }
+    lastWaterReminder.set(guildId, Date.now());
+    return updateSettings(guildId, { waterReminderIntervalMinutes: value });
+  }
+
+  function getWaterReminderStatus(guildId) {
+    const settings = getSettings(guildId);
+    return {
+      mode: settings.waterReminderMode || 'off',
+      intervalMinutes: settings.waterReminderIntervalMinutes || config.WATER_REMINDER_INTERVAL_MINUTES,
+      userIds: settings.waterReminderUserIds || [],
+    };
+  }
+
   function handleTrackStart({ guildId, track, textChannelId }) {
     touch(guildId);
     const settings = getSettings(guildId);
@@ -138,7 +176,39 @@ function createSocialService({ client, config, state, music }) {
     }
   }
 
-  const timer = setInterval(() => void checkAtmosphere(), 60_000);
+  async function checkWaterReminders() {
+    const now = Date.now();
+    for (const guild of client.guilds.cache.values()) {
+      const settings = getSettings(guild.id);
+      const mode = settings.waterReminderMode || 'off';
+      if (mode === 'off') continue;
+
+      const voiceChannel = guild.members.me?.voice?.channel;
+      const humans = voiceChannel?.members?.filter((member) => !member.user.bot);
+      if (!voiceChannel || !humans || humans.size === 0) continue;
+
+      const targets = mode === 'all'
+        ? [...humans.values()]
+        : [...humans.values()].filter((member) => (settings.waterReminderUserIds || []).includes(member.id));
+      if (targets.length === 0) continue;
+
+      const interval = (settings.waterReminderIntervalMinutes || config.WATER_REMINDER_INTERVAL_MINUTES) * 60_000;
+      if (now - (lastWaterReminder.get(guild.id) || now) < interval) continue;
+
+      const mentions = targets.map((member) => `<@${member.id}>`).join(' ');
+      await send(
+        voiceChannel,
+        `Đến giờ uống nước rồi nè 💧🍑 ${mentions}\nUống vài ngụm rồi quay lại học tiếp nha!`,
+        { parse: [], users: targets.map((member) => member.id) }
+      );
+      lastWaterReminder.set(guild.id, now);
+    }
+  }
+
+  const timer = setInterval(() => {
+    void checkAtmosphere();
+    void checkWaterReminders();
+  }, 60_000);
   timer.unref?.();
 
   return {
@@ -152,6 +222,11 @@ function createSocialService({ client, config, state, music }) {
     toggleAtmosphere,
     toggleRadio,
     toggleSmartQueue,
+    setWaterReminderMode,
+    addWaterReminderUser,
+    removeWaterReminderUser,
+    setWaterReminderInterval,
+    getWaterReminderStatus,
     destroy() {
       clearInterval(timer);
     },

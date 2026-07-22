@@ -8,6 +8,7 @@ const { config, ensureMusicDirectory } = require('./config');
 const { createAiService } = require('./ai/gemini');
 const { createCommandService } = require('./commands');
 const { createMusicService } = require('./music/service');
+const { createReminderService } = require('./reminders');
 const { createSocialService } = require('./social');
 const { createStateStore } = require('./state/store');
 const { createUiService } = require('./ui');
@@ -38,9 +39,11 @@ const music = createMusicService({ client, config, stateStore: state });
 const social = createSocialService({ client, config, state, music });
 const ai = createAiService({ client, config, music, state });
 const ui = createUiService({ music, config, state, social });
-const commands = createCommandService({ client, config, music, ui, state, social });
+const reminders = createReminderService({ client, config, state, music });
+const commands = createCommandService({ client, config, music, ui, state, social, reminders });
 
 music.on('trackStart', social.handleTrackStart);
+music.on('alarmEnd', reminders.handleAlarmEnd);
 
 client.on('debug', (message) => {
   if (String(message).startsWith('[VOICE]')) {
@@ -94,6 +97,7 @@ client.on('interactionCreate', (interaction) => {
 
 function shutdown(signal) {
   console.log(`Received ${signal}, cleaning up voice connections...`);
+  reminders.destroy();
   social.destroy();
   ui.destroy();
   music.cleanupAll();

@@ -9,8 +9,12 @@ function createStateStore({ config }) {
     voiceGreeting: config.VOICE_GREETING_DEFAULT ?? true,
     smartQueue: config.SMART_QUEUE_DEFAULT,
     mood: config.MOOD_DEFAULT || 'auto',
+    ducking: config.AUTO_DUCKING_DEFAULT ?? true,
+    waterReminderMode: 'off',
+    waterReminderIntervalMinutes: config.WATER_REMINDER_INTERVAL_MINUTES || 60,
+    waterReminderUserIds: [],
   };
-  let data = { guilds: {}, memories: {} };
+  let data = { guilds: {}, memories: {}, reminders: { todos: [], alarms: [] } };
 
   function load() {
     try {
@@ -19,6 +23,10 @@ function createStateStore({ config }) {
         data = {
           guilds: parsed.guilds || {},
           memories: parsed.memories || {},
+          reminders: {
+            todos: parsed.reminders?.todos || [],
+            alarms: parsed.reminders?.alarms || [],
+          },
         };
       }
     } catch (error) {
@@ -79,6 +87,44 @@ function createStateStore({ config }) {
     return memory.notes.map((note, index) => `${index + 1}. ${note}`).join('\n');
   }
 
+  function addReminder(kind, reminder) {
+    if (!['todos', 'alarms'].includes(kind)) throw new Error(`Unknown reminder kind: ${kind}`);
+    data.reminders[kind].push(reminder);
+    save();
+    return reminder;
+  }
+
+  function listReminders(kind, statuses = ['pending', 'ringing']) {
+    if (!['todos', 'alarms'].includes(kind)) throw new Error(`Unknown reminder kind: ${kind}`);
+    return data.reminders[kind].filter((reminder) => statuses.includes(reminder.status));
+  }
+
+  function updateReminder(id, patch) {
+    for (const kind of ['todos', 'alarms']) {
+      const reminder = data.reminders[kind].find((item) => item.id === id);
+      if (!reminder) continue;
+      Object.assign(reminder, patch);
+      save();
+      return reminder;
+    }
+    return null;
+  }
+
+  function getReminder(id) {
+    for (const kind of ['todos', 'alarms']) {
+      const reminder = data.reminders[kind].find((item) => item.id === id);
+      if (reminder) return reminder;
+    }
+    return null;
+  }
+
+  function getReminderCounts() {
+    return {
+      todos: listReminders('todos').length,
+      alarms: listReminders('alarms').length,
+    };
+  }
+
   load();
 
   return {
@@ -88,6 +134,11 @@ function createStateStore({ config }) {
     formatMemory,
     remember,
     forgetUser,
+    addReminder,
+    listReminders,
+    updateReminder,
+    getReminder,
+    getReminderCounts,
   };
 }
 

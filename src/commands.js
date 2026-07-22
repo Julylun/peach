@@ -3,7 +3,7 @@ const {
   SlashCommandBuilder,
 } = require('discord.js');
 
-function createCommandService({ client, config, music, ui, state, social }) {
+function createCommandService({ client, config, music, ui, state, social, reminders }) {
   const AudioPlayerStatus = music.activePlayerStatus;
   const VoiceConnectionStatus = music.voiceStatus;
 
@@ -23,6 +23,99 @@ function createCommandService({ client, config, music, ui, state, social }) {
           .setDescription('Bộ lọc file local hoặc URL YouTube')
           .setRequired(false)),
       new SlashCommandBuilder().setName('playlists').setDescription('Xem các playlist trong thư mục music'),
+      new SlashCommandBuilder()
+        .setName('ducking')
+        .setDescription('Bật/tắt tự giảm âm lượng khi có người nói')
+        .addBooleanOption((option) => option
+          .setName('enabled')
+          .setDescription('Bật hoặc tắt auto ducking')
+          .setRequired(false)),
+      new SlashCommandBuilder()
+        .setName('water')
+        .setDescription('Cấu hình lời nhắc uống nước trong voice room')
+        .addSubcommand((subcommand) => subcommand
+          .setName('mode')
+          .setDescription('Chọn người nhận lời nhắc')
+          .addStringOption((option) => option
+            .setName('value')
+            .setDescription('Tắt, nhắc tất cả hoặc nhắc người đã chọn')
+            .setRequired(true)
+            .addChoices(
+              { name: 'Tắt nhắc', value: 'off' },
+              { name: 'Tất cả người trong room', value: 'all' },
+              { name: 'Người đã chọn', value: 'selected' },
+            ))
+          .addUserOption((option) => option
+            .setName('user')
+            .setDescription('Thêm người này vào nhóm được nhắc')
+            .setRequired(false)))
+        .addSubcommand((subcommand) => subcommand
+          .setName('add')
+          .setDescription('Thêm một người vào nhóm được nhắc')
+          .addUserOption((option) => option.setName('user').setDescription('Người cần nhắc').setRequired(true)))
+        .addSubcommand((subcommand) => subcommand
+          .setName('remove')
+          .setDescription('Bỏ một người khỏi nhóm được nhắc')
+          .addUserOption((option) => option.setName('user').setDescription('Người không cần nhắc').setRequired(true)))
+        .addSubcommand((subcommand) => subcommand
+          .setName('interval')
+          .setDescription('Đặt khoảng thời gian giữa các lần nhắc')
+          .addIntegerOption((option) => option
+            .setName('minutes')
+            .setDescription('Từ 5 đến 240 phút')
+            .setMinValue(5)
+            .setMaxValue(240)
+            .setRequired(true)))
+        .addSubcommand((subcommand) => subcommand
+          .setName('status')
+          .setDescription('Xem cấu hình nhắc uống nước')),
+      new SlashCommandBuilder()
+        .setName('todo')
+        .setDescription('Đặt một việc cần làm và nhận DM khi đến giờ')
+        .addStringOption((option) => option
+          .setName('title')
+          .setDescription('Tên công việc')
+          .setRequired(true))
+        .addIntegerOption((option) => option
+          .setName('hour')
+          .setDescription('Giờ theo định dạng 24h, từ 0 đến 23')
+          .setMinValue(0)
+          .setMaxValue(23)
+          .setRequired(true))
+        .addIntegerOption((option) => option
+          .setName('minute')
+          .setDescription('Phút từ 0 đến 59')
+          .setMinValue(0)
+          .setMaxValue(59)
+          .setRequired(true))
+        .addStringOption((option) => option
+          .setName('description')
+          .setDescription('Mô tả công việc, có thể bỏ trống')
+          .setRequired(false)),
+      new SlashCommandBuilder()
+        .setName('alarm')
+        .setDescription('Đặt báo thức phát nhạc trong voice channel')
+        .addStringOption((option) => option
+          .setName('title')
+          .setDescription('Mô tả báo thức')
+          .setRequired(true))
+        .addIntegerOption((option) => option
+          .setName('hour')
+          .setDescription('Giờ theo định dạng 24h, từ 0 đến 23')
+          .setMinValue(0)
+          .setMaxValue(23)
+          .setRequired(true))
+        .addIntegerOption((option) => option
+          .setName('minute')
+          .setDescription('Phút từ 0 đến 59')
+          .setMinValue(0)
+          .setMaxValue(59)
+          .setRequired(true))
+        .addStringOption((option) => option
+          .setName('music')
+          .setDescription('Tên file local, bộ lọc file hoặc URL YouTube')
+          .setRequired(true)),
+      new SlashCommandBuilder().setName('reminders').setDescription('Xem số todo và báo thức đang chờ'),
       new SlashCommandBuilder().setName('pause').setDescription('Tạm dừng bài đang phát'),
       new SlashCommandBuilder().setName('resume').setDescription('Tiếp tục phát bài'),
       new SlashCommandBuilder()
@@ -192,6 +285,103 @@ function createCommandService({ client, config, music, ui, state, social }) {
     message.reply(`Playlist hiện có:\n${lines.join('\n')}`).catch(() => {});
   }
 
+  function getMentionedUserId(message, value) {
+    return message.mentions?.users?.first()?.id || String(value || '').match(/<@!?([0-9]+)>/)?.[1] || value;
+  }
+
+  function formatWaterStatus(guildId) {
+    const water = social.getWaterReminderStatus(guildId);
+    const target = water.mode === 'all'
+      ? 'tất cả người trong room'
+      : water.mode === 'selected'
+        ? `${water.userIds.length} người đã chọn`
+        : 'tắt';
+    return `Water reminder: **${target}**\nKhoảng nhắc: **${water.intervalMinutes} phút**`;
+  }
+
+  function handleDucking(message, value) {
+    const current = music.getState(message.guild.id).ducking;
+    const enabled = parseToggle(value, current);
+    const result = music.setDucking(message.guild.id, enabled);
+    message.reply(`Auto ducking: **${result ? 'bật' : 'tắt'}** 🎙️🔉`).catch(() => {});
+  }
+
+  function handleWater(message, args) {
+    const subcommand = (args[0] || 'status').toLowerCase();
+    const userId = getMentionedUserId(message, args[1]);
+    switch (subcommand) {
+      case 'off':
+      case 'all':
+      case 'selected':
+        if (subcommand === 'selected' && userId) social.addWaterReminderUser(message.guild.id, userId);
+        else social.setWaterReminderMode(message.guild.id, subcommand);
+        message.reply(`${formatWaterStatus(message.guild.id)} 💧`).catch(() => {});
+        break;
+      case 'add':
+        if (!userId) throw new Error('Dùng `!water add @user`.');
+        social.addWaterReminderUser(message.guild.id, userId);
+        message.reply(`${formatWaterStatus(message.guild.id)}\nĐã thêm <@${userId}> 💧`).catch(() => {});
+        break;
+      case 'remove':
+        if (!userId) throw new Error('Dùng `!water remove @user`.');
+        social.removeWaterReminderUser(message.guild.id, userId);
+        message.reply(`${formatWaterStatus(message.guild.id)}\nĐã bỏ <@${userId}>.`).catch(() => {});
+        break;
+      case 'interval':
+        social.setWaterReminderInterval(message.guild.id, args[1]);
+        message.reply(`${formatWaterStatus(message.guild.id)} 💧`).catch(() => {});
+        break;
+      case 'status':
+        message.reply(formatWaterStatus(message.guild.id)).catch(() => {});
+        break;
+      default:
+        throw new Error('Dùng `!water off`, `!water all`, `!water add @user`, `!water remove @user`, `!water interval 60` hoặc `!water status`.');
+    }
+  }
+
+  function formatReminderCounts() {
+    const counts = reminders.getCounts();
+    return `Đang có **${counts.todos} todo** và **${counts.alarms} báo thức** chờ xử lý trên hệ thống.\n` +
+      `Múi giờ: **${config.TIMEZONE}** ⏰🍑`;
+  }
+
+  function parsePrefixTime(value) {
+    const match = String(value || '').match(/^(\d{1,2}):(\d{2})$/);
+    if (!match) throw new Error('Thời gian phải có dạng `HH:MM`, ví dụ `08:30`.');
+    return { hour: Number(match[1]), minute: Number(match[2]) };
+  }
+
+  function handleTodo(message, args) {
+    const [timeText, title, description = ''] = args.join(' ').split('|').map((item) => item.trim());
+    if (!timeText || !title) throw new Error('Dùng `!todo HH:MM | Title | Description` (Description có thể bỏ trống).');
+    const time = parsePrefixTime(timeText);
+    const todo = reminders.createTodo({
+      guildId: message.guild.id,
+      userId: message.author.id,
+      title,
+      description,
+      ...time,
+    });
+    message.reply(`Đã đặt todo **${todo.title}** lúc **${reminders.formatTime(todo.dueAt)}**. Peach sẽ DM bạn nha 🍑✅`).catch(() => {});
+  }
+
+  function handleAlarm(message, args) {
+    const [timeText, title, musicInput] = args.join(' ').split('|').map((item) => item.trim());
+    if (!timeText || !title || !musicInput) throw new Error('Dùng `!alarm HH:MM | Title | tên-file-hoặc-URL`.');
+    const time = parsePrefixTime(timeText);
+    const voiceChannelId = message.guild.members.me?.voice?.channelId || message.member?.voice?.channelId;
+    const alarm = reminders.createAlarm({
+      guildId: message.guild.id,
+      userId: message.author.id,
+      title,
+      musicInput,
+      textChannelId: message.channel.id,
+      voiceChannelId,
+      ...time,
+    });
+    message.reply(`Đã đặt báo thức **${alarm.title}** lúc **${reminders.formatTime(alarm.dueAt)}** với nhạc \`${musicInput}\` ⏰🎵`).catch(() => {});
+  }
+
   function handlePause(message) {
     const state = music.getState(message.guild.id);
     if (state.player.state.status !== AudioPlayerStatus.Playing) {
@@ -216,9 +406,7 @@ function createCommandService({ client, config, music, ui, state, social }) {
     if (!Number.isInteger(percent) || percent < 0 || percent > 200) {
       throw new Error('Âm lượng cần là số nguyên từ `0` đến `200`.');
     }
-    const state = music.getState(message.guild.id);
-    state.volume = percent / 100;
-    state.activeResource?.volume?.setVolume(state.volume);
+    music.setVolume(message.guild.id, percent / 100);
     message.reply(`Âm lượng PeachBot: **${percent}%**.`).catch(() => {});
   }
 
@@ -380,6 +568,12 @@ function createCommandService({ client, config, music, ui, state, social }) {
       `\`${config.PREFIX}play [lọc|URL YouTube]\` - phát toàn bộ nhạc local, lọc file hoặc stream YouTube`,
       `\`${config.PREFIX}play playlist:lofi\` - phát một playlist trong music/`,
       `\`${config.PREFIX}playlists\` - xem playlist hiện có`,
+      `\`${config.PREFIX}ducking [on|off]\` - tự giảm nhạc khi có người nói`,
+      `\`${config.PREFIX}water off|all|selected\` - cấu hình nhắc uống nước`,
+      `\`${config.PREFIX}water add|remove @user\` / \`${config.PREFIX}water interval 60\` - quản lý người và thời gian nhắc`,
+      `\`${config.PREFIX}todo HH:MM | Title | Description\` - đặt todo và nhận DM`,
+      `\`${config.PREFIX}alarm HH:MM | Title | music\` - đặt báo thức trong voice`,
+      `\`${config.PREFIX}reminders\` - xem số todo/báo thức đang chờ`,
       `\`${config.PREFIX}pause\` / \`${config.PREFIX}resume\` - tạm dừng/tiếp tục`,
       `\`${config.PREFIX}volume <0-200>\` - chỉnh âm lượng`,
       `\`${config.PREFIX}nowplaying\` - xem bài đang phát`,
@@ -420,6 +614,22 @@ function createCommandService({ client, config, music, ui, state, social }) {
         case 'playlists':
         case 'playlist':
           handlePlaylists(message);
+          break;
+        case 'ducking':
+          handleDucking(message, args[0]);
+          break;
+        case 'water':
+          handleWater(message, args);
+          break;
+        case 'todo':
+          handleTodo(message, args);
+          break;
+        case 'alarm':
+          handleAlarm(message, args);
+          break;
+        case 'reminders':
+        case 'reminder':
+          await message.reply(formatReminderCounts());
           break;
         case 'pause':
           handlePause(message);
@@ -567,6 +777,11 @@ function createCommandService({ client, config, music, ui, state, social }) {
   }
 
   async function handleInteraction(interaction) {
+    if (interaction.isButton?.() && interaction.customId.startsWith('peach:alarm:')) {
+      await reminders.handleInteraction(interaction);
+      return;
+    }
+
     if (interaction.isAutocomplete()) {
       await handleAutocomplete(interaction).catch((error) => {
         console.error(`[autocomplete:${interaction.id}] failed`, error);
@@ -614,6 +829,64 @@ function createCommandService({ client, config, music, ui, state, social }) {
             : 'Chưa có playlist nào. Hãy tạo folder con trong thư mục `music/`.';
         });
         break;
+      case 'ducking':
+        await respondToInteraction(interaction, async () => {
+          const state = music.getState(interaction.guild.id);
+          const enabled = interaction.options.getBoolean('enabled') ?? !state.ducking;
+          const result = music.setDucking(interaction.guild.id, enabled);
+          return `Auto ducking: **${result ? 'bật' : 'tắt'}** 🎙️🔉`;
+        });
+        break;
+      case 'water':
+        await respondToInteraction(interaction, async () => {
+          const subcommand = interaction.options.getSubcommand();
+          const guildId = interaction.guild.id;
+          if (subcommand === 'mode') {
+            const mode = interaction.options.getString('value');
+            const user = interaction.options.getUser('user');
+            if (mode === 'selected' && user) social.addWaterReminderUser(guildId, user.id);
+            else social.setWaterReminderMode(guildId, mode);
+          } else if (subcommand === 'add') {
+            social.addWaterReminderUser(guildId, interaction.options.getUser('user').id);
+          } else if (subcommand === 'remove') {
+            social.removeWaterReminderUser(guildId, interaction.options.getUser('user').id);
+          } else if (subcommand === 'interval') {
+            social.setWaterReminderInterval(guildId, interaction.options.getInteger('minutes'));
+          }
+          return formatWaterStatus(guildId);
+        });
+        break;
+      case 'todo':
+        await respondToInteraction(interaction, async () => {
+          const todo = reminders.createTodo({
+            guildId: interaction.guild.id,
+            userId: interaction.user.id,
+            title: interaction.options.getString('title'),
+            description: interaction.options.getString('description') || '',
+            hour: interaction.options.getInteger('hour'),
+            minute: interaction.options.getInteger('minute'),
+          });
+          return `Đã đặt todo **${todo.title}** lúc **${reminders.formatTime(todo.dueAt)}**. Peach sẽ DM bạn khi đến giờ nha 🍑✅`;
+        });
+        break;
+      case 'alarm':
+        await respondToInteraction(interaction, async () => {
+          const alarm = reminders.createAlarm({
+            guildId: interaction.guild.id,
+            userId: interaction.user.id,
+            title: interaction.options.getString('title'),
+            hour: interaction.options.getInteger('hour'),
+            minute: interaction.options.getInteger('minute'),
+            musicInput: interaction.options.getString('music'),
+            textChannelId: interaction.channelId,
+            voiceChannelId: interaction.member?.voice?.channelId || interaction.guild.members.me?.voice?.channelId,
+          });
+          return `Đã đặt báo thức **${alarm.title}** lúc **${reminders.formatTime(alarm.dueAt)}**. Nhạc: \`${alarm.musicInput}\` ⏰🎵`;
+        });
+        break;
+      case 'reminders':
+        await respondToInteraction(interaction, async () => formatReminderCounts());
+        break;
       case 'pause':
         await respondToInteraction(interaction, async () => {
           const state = music.getState(interaction.guild.id);
@@ -631,9 +904,7 @@ function createCommandService({ client, config, music, ui, state, social }) {
       case 'volume':
         await respondToInteraction(interaction, async () => {
           const percent = interaction.options.getInteger('percent');
-          const state = music.getState(interaction.guild.id);
-          state.volume = percent / 100;
-          state.activeResource?.volume?.setVolume(state.volume);
+          music.setVolume(interaction.guild.id, percent / 100);
           return `Âm lượng PeachBot: **${percent}%**.`;
         });
         break;

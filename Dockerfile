@@ -3,6 +3,7 @@
 FROM node:22-bookworm
 
 ENV NODE_ENV=production
+ENV TZ=Asia/Ho_Chi_Minh
 WORKDIR /app
 
 # FFmpeg is required for decoding local audio files. The build tools allow

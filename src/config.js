@@ -3,6 +3,8 @@ const path = require('path');
 
 require('dotenv').config();
 
+if (process.env.PEACH_TIMEZONE) process.env.TZ = process.env.PEACH_TIMEZONE;
+
 const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number);
 if (nodeMajor < 22 || (nodeMajor === 22 && nodeMinor < 12)) {
   throw new Error(
@@ -30,12 +32,15 @@ function resolveFfmpegPath() {
 }
 
 const config = {
+  TIMEZONE: process.env.PEACH_TIMEZONE || 'Asia/Ho_Chi_Minh',
   DISCORD_TOKEN: process.env.DISCORD_TOKEN || '',
   PREFIX: process.env.COMMAND_PREFIX || '!',
   MUSIC_DIR: path.resolve(process.env.MUSIC_DIR || path.join(process.cwd(), 'music')),
   STATE_FILE: path.resolve(process.env.PEACH_STATE_FILE || path.join(process.cwd(), 'data', 'peach-state.json')),
   FFMPEG_PATH: resolveFfmpegPath(),
   YTDLP_PATH: process.env.YTDLP_PATH?.trim() || 'yt-dlp',
+  AUTO_DUCKING_DEFAULT: process.env.AUTO_DUCKING_ENABLED !== 'false',
+  DUCKING_VOLUME: parseNumberEnv('DUCKING_VOLUME', 0.35, 0.05, 1),
   ENABLE_PREFIX_COMMANDS: process.env.ENABLE_PREFIX_COMMANDS === 'true',
   GUILD_ID: process.env.DISCORD_GUILD_ID || '',
   VOICE_DEBUG: process.env.VOICE_DEBUG !== 'false',
@@ -83,6 +88,8 @@ const config = {
   PANEL_REFRESH_SECONDS: parseNumberEnv('PANEL_REFRESH_SECONDS', 15, 5, 120),
   ATMOSPHERE_IDLE_MINUTES: parseNumberEnv('ATMOSPHERE_IDLE_MINUTES', 10, 2, 120),
   RADIO_HOST_EVERY_TRACKS: parseNumberEnv('RADIO_HOST_EVERY_TRACKS', 3, 1, 20),
+  WATER_REMINDER_INTERVAL_MINUTES: parseNumberEnv('WATER_REMINDER_INTERVAL_MINUTES', 60, 5, 240),
+  ALARM_DURATION_SECONDS: parseNumberEnv('ALARM_DURATION_SECONDS', 90, 30, 120),
 };
 
 function ensureMusicDirectory() {
